@@ -183,3 +183,7 @@ label.filebtn:focus-within{outline:3px solid var(--blue);outline-offset:1px}
 .fem select{width:auto}
 .legend-inline{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.85rem;color:var(--muted);padding:0 18px}
 .legend-inline i{display:inline-block;width:18px;height:3px;vertical-align:4px;margin-right:6px}
+.certprev{position:relative}
+.certprev canvas{cursor:crosshair;touch-action:none}
+.selbox{position:absolute;border:2px solid var(--bronze);background:rgba(214,174,85,.18);pointer-events:none}
+button:disabled{opacity:.45;cursor:not-allowed}

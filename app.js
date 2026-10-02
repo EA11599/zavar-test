@@ -716,13 +716,90 @@
   const cstat = t => { $('certStatus').textContent = t; };
   let CERTP = null;   // rezultat čitanja prije potvrde
 
-  async function ocrCanvas(canvas, page, label) {
+  // Procjena nagiba fotografije (metoda projekcijskog profila): kut pri kojem su retci teksta najoštriji
+  function estimateSkew(src) {
+    const sw = Math.min(900, src.width), k = sw / src.width, sh = Math.round(src.height * k);
+    const cv = document.createElement('canvas'); cv.width = sw; cv.height = sh;
+    const c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(src, 0, 0, sw, sh);
+    const d = c.getImageData(0, 0, sw, sh).data;
+    let mean = 0; for (let i = 0; i < sw * sh; i++) mean += d[4 * i + 1]; mean /= sw * sh;
+    const xs = [], ys = [];
+    for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) if (d[4 * (y * sw + x) + 1] < mean * 0.6) { xs.push(x); ys.push(y); }
+    if (xs.length < 200) return 0;
+    const score = deg => {
+      const t = Math.tan(deg * Math.PI / 180), bins = new Float64Array(sh * 2 + 10), off = sh;
+      for (let i = 0; i < xs.length; i++) { const b = Math.round(ys[i] - xs[i] * t) + off; if (b >= 0 && b < bins.length) bins[b]++; }
+      let s = 0; for (const v of bins) s += v * v; return s;
+    };
+    let best = 0, bs = -1;
+    for (let a = -5; a <= 5.001; a += 0.25) { const s = score(a); if (s > bs) { bs = s; best = a; } }
+    const c0 = best; for (let a = c0 - 0.25; a <= c0 + 0.25; a += 0.05) { const s = score(a); if (s > bs) { bs = s; best = a; } }
+    return Math.abs(best) < 0.1 ? 0 : best;
+  }
+  function rotateCanvas(src, deg) {
+    if (!deg) return src;
+    const r = deg * Math.PI / 180, cs = Math.abs(Math.cos(r)), sn = Math.abs(Math.sin(r));
+    const w = Math.ceil(src.width * cs + src.height * sn), h = Math.ceil(src.width * sn + src.height * cs);
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const c = cv.getContext('2d'); c.fillStyle = '#fff'; c.fillRect(0, 0, w, h);
+    c.translate(w / 2, h / 2); c.rotate(-r); c.imageSmoothingQuality = 'high'; c.drawImage(src, -src.width / 2, -src.height / 2);
+    return cv;
+  }
+
+  // Priprema slike za OCR: povećanje, sivi tonovi, prag (Otsu), uklanjanje dugih crta tablice, bijeli rub
+  function prepForOcr(src0, opts = {}) {
+    const skew = opts.deskew === false ? 0 : estimateSkew(src0);
+    const src = rotateCanvas(src0, skew);
+    const target = opts.targetW || 3000;
+    const scale = Math.max(0.5, Math.min(opts.maxScale || 6, target / src.width));
+    const w = Math.round(src.width * scale), h = Math.round(src.height * scale), pad = 24;
+    const cv = document.createElement('canvas'); cv.width = w + 2 * pad; cv.height = h + 2 * pad;
+    const c = cv.getContext('2d', { willReadFrequently: true });
+    c.fillStyle = '#fff'; c.fillRect(0, 0, cv.width, cv.height);
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.drawImage(src, pad, pad, w, h);
+    const im = c.getImageData(0, 0, cv.width, cv.height), d = im.data, W2 = cv.width, H2 = cv.height, n = W2 * H2;
+    const g = new Uint8Array(n), hist = new Uint32Array(256);
+    for (let i = 0; i < n; i++) { const v = (0.299 * d[4 * i] + 0.587 * d[4 * i + 1] + 0.114 * d[4 * i + 2]) | 0; g[i] = v; hist[v]++; }
+    let sum = 0; for (let t = 0; t < 256; t++) sum += t * hist[t];
+    let wB = 0, sB = 0, best = -1, th = 128;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t]; if (!wB) continue; const wF = n - wB; if (!wF) break;
+      sB += t * hist[t]; const m = sB / wB - (sum - sB) / wF, v = wB * wF * m * m;
+      if (v > best) { best = v; th = t; }
+    }
+    const dark = new Uint8Array(n); for (let i = 0; i < n; i++) dark[i] = g[i] <= th ? 1 : 0;
+    const out = new Uint8Array(n); for (let i = 0; i < n; i++) out[i] = dark[i];
+    const hMin = Math.round(W2 * (opts.hLine || 0.12)), vMin = Math.round(H2 * (opts.vLine || 0.03));
+    for (let y = 0; y < H2; y++) {                       // vodoravne crte
+      let run = 0;
+      for (let x = 0; x <= W2; x++) {
+        if (x < W2 && dark[y * W2 + x]) run++;
+        else { if (run >= hMin) for (let k = x - run; k < x; k++) out[y * W2 + k] = 0; run = 0; }
+      }
+    }
+    for (let x = 0; x < W2; x++) {                       // okomite crte
+      let run = 0;
+      for (let y = 0; y <= H2; y++) {
+        if (y < H2 && dark[y * W2 + x]) run++;
+        else { if (run >= vMin) for (let k = y - run; k < y; k++) out[k * W2 + x] = 0; run = 0; }
+      }
+    }
+    for (let i = 0; i < n; i++) { const v = out[i] ? 0 : 255; d[4 * i] = d[4 * i + 1] = d[4 * i + 2] = v; d[4 * i + 3] = 255; }
+    c.putImageData(im, 0, 0);
+    return cv;
+  }
+
+  async function ocrCanvas(canvas, page, label, opts = {}) {
     await loadScript(TESS);
+    cstat(`${label}: priprema slike…`);
+    const prepped = prepForOcr(canvas, opts);
     const worker = await window.Tesseract.createWorker('eng', 1, {
       logger: m => { if (m.status === 'recognizing text') cstat(`${label}: prepoznavanje teksta ${Math.round(m.progress * 100)} %`); }
     });
     try {
-      const { data } = await worker.recognize(canvas);
+      await worker.setParameters({ tessedit_pageseg_mode: String(opts.psm || 3), preserve_interword_spaces: '1' });
+      const { data } = await worker.recognize(prepped);
       return (data.words || []).map(w => ({ t: w.text, x: w.bbox.x0, y: (w.bbox.y0 + w.bbox.y1) / 2, w: w.bbox.x1 - w.bbox.x0, h: w.bbox.y1 - w.bbox.y0, page }));
     } finally { await worker.terminate(); }
   }
@@ -758,7 +835,7 @@
   async function readImage(file) {
     const url = URL.createObjectURL(file);
     const img = new Image(); img.src = url; await img.decode();
-    const scale = Math.min(1, 2400 / Math.max(img.naturalWidth, img.naturalHeight)) * (Math.max(img.naturalWidth, img.naturalHeight) < 1200 ? 2 : 1);
+    const scale = Math.min(1, 4000 / Math.max(img.naturalWidth, img.naturalHeight));
     const cv = document.createElement('canvas'); cv.width = Math.round(img.naturalWidth * scale); cv.height = Math.round(img.naturalHeight * scale);
     const c = cv.getContext('2d'); c.drawImage(img, 0, 0, cv.width, cv.height);
     URL.revokeObjectURL(url);
@@ -791,8 +868,11 @@
       const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
       const out = isPdf ? await readPdf(file) : await readImage(file);
       const res = window.Cert.parse(out.tokens);
-      CERTP = { res, ocr: out.ocr, name: file.name };
-      $('certPrev').innerHTML = ''; out.preview.setAttribute('aria-label', 'Pregled certifikata'); $('certPrev').appendChild(out.preview);
+      CERTP = { res, ocr: out.ocr, name: file.name, canvas: out.preview, sel: null };
+      $('certPrev').innerHTML = '<div class="selbox" id="certSel" hidden></div>';
+      out.preview.setAttribute('aria-label', 'Pregled certifikata; mišem se može označiti tablica kemijskog sastava');
+      $('certPrev').prepend(out.preview); bindSelection(out.preview);
+      $('certCrop').disabled = true;
       $('certMeta').innerHTML = [
         res.grade ? `Oznaka: <b>${esc(res.grade)}</b>` : 'Oznaka čelika nije pronađena',
         res.heat ? `talina <b>${esc(res.heat)}</b>` : null,
@@ -810,6 +890,47 @@
     }
   });
   $('certRow').addEventListener('change', showCertRow);
+
+  // Označavanje tablice na pregledu: OCR samo na izrezu, uz jače povećanje
+  function bindSelection(cv) {
+    let start = null;
+    const pt = ev => { const r = cv.getBoundingClientRect(); return { x: (ev.clientX - r.left) * cv.width / r.width, y: (ev.clientY - r.top) * cv.height / r.height, r }; };
+    const draw = (a, b) => {
+      const r = cv.getBoundingClientRect(), k = r.width / cv.width, box = $('certSel');
+      Object.assign(box.style, { left: Math.min(a.x, b.x) * k + 'px', top: Math.min(a.y, b.y) * k + 'px', width: Math.abs(b.x - a.x) * k + 'px', height: Math.abs(b.y - a.y) * k + 'px' });
+      box.hidden = false;
+    };
+    cv.addEventListener('pointerdown', ev => { start = pt(ev); cv.setPointerCapture(ev.pointerId); ev.preventDefault(); });
+    cv.addEventListener('pointermove', ev => { if (start) draw(start, pt(ev)); });
+    cv.addEventListener('pointerup', ev => {
+      if (!start) return; const end = pt(ev);
+      const sel = { x: Math.max(0, Math.min(start.x, end.x)), y: Math.max(0, Math.min(start.y, end.y)), w: Math.abs(end.x - start.x), h: Math.abs(end.y - start.y) };
+      start = null;
+      if (sel.w < 20 || sel.h < 10) { $('certSel').hidden = true; CERTP.sel = null; $('certCrop').disabled = true; return; }
+      CERTP.sel = sel; $('certCrop').disabled = false;
+      cstat('Područje je označeno. Klikni "Pročitaj označeno područje".');
+    });
+  }
+  $('certCrop').addEventListener('click', async () => {
+    if (!CERTP || !CERTP.sel) return;
+    const s = CERTP.sel, crop = document.createElement('canvas');
+    crop.width = Math.round(s.w); crop.height = Math.round(s.h);
+    crop.getContext('2d').drawImage(CERTP.canvas, s.x, s.y, s.w, s.h, 0, 0, crop.width, crop.height);
+    $('certCrop').disabled = true;
+    try {
+      const toks = await ocrCanvas(crop, 1, 'Označeno područje', { psm: 6, targetW: 3200, maxScale: 10, hLine: 0.15, vLine: 0.45 });
+      const r2 = window.Cert.parse(toks);
+      if (r2.rows.length) {
+        CERTP.res.rows = r2.rows; CERTP.ocr = true;
+        if (Number.isFinite(r2.cev)) CERTP.res.cev = r2.cev;
+        $('certRow').innerHTML = r2.rows.map((r, i) => `<option value="${i}">${esc(r.label)}</option>`).join('');
+        $('certRowWrap').hidden = r2.rows.length < 2;
+        showCertRow();
+        cstat(`Iz označenog područja pročitano je ${r2.rows.length} ${r2.rows.length === 1 ? 'redak' : 'retka'} analize. Provjeri vrijednosti prema slici.`);
+      } else cstat('Ni u označenom području nije prepoznata tablica. Pokušaj označiti tablicu zajedno sa zaglavljem (C, Si, Mn…) ili upiši vrijednosti ručno.');
+    } catch (e) { cstat('Čitanje označenog područja nije uspjelo: ' + (e && e.message ? e.message : e)); }
+    $('certCrop').disabled = false;
+  });
   $('certCancel').addEventListener('click', () => { $('certPanel').hidden = true; cstat('Učitavanje certifikata je otkazano.'); });
   $('certApply').addEventListener('click', () => {
     const val = k => { const el = $('certChem').querySelector(`[data-el="${k}"]`); const v = el ? parseFloat(el.value) : NaN; return Number.isFinite(v) ? v : null; };

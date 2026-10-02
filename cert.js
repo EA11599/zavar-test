@@ -22,12 +22,29 @@
   const FACTORS = [1, 0.1, 0.01, 0.001, 0.0001];
 
   function normSym(t) {
-    const u = t.replace(/[%:.,;|]/g, '').replace(/^\((.*)\)$/, '$1').trim();
+    let u = t.replace(/[%:.,;|\-_'"’”“~*]/g, '').replace(/^\((.*)\)$/, '$1').trim();
+    u = u.replace(/^[^A-Za-z(]+(?=[A-Za-z]{2,}$)/, '');   // smeće ispred simbola ("§86CEV")
     if (!u || u.length > 7) return null;
-    // u tablicama su simboli pisani s velikim početnim slovom; jedno malo slovo (npr. "c") ne prihvaćamo
-    if (/^[a-z]$/.test(u)) return null;
+    // OCR zna udvostručiti slovo ("Cc", "Ss", "Vv")
+    const dbl = u.match(/^([A-Za-z])\1$/i); if (dbl) u = dbl[1];
     const k = u.toUpperCase();
     return ALIAS[k] || null;
+  }
+
+  // OCR često iskrivi simbol u zaglavlju (npr. "Man%" za Mn%). Za riječi s oznakom % prihvaća se
+  // simbol čija se slova pojavljuju redom u riječi, uz najviše dva suvišna znaka.
+  const FUZZY = ['Si', 'Mn', 'Cr', 'Ni', 'Mo', 'Cu', 'Nb', 'Ti', 'Al', 'C', 'P', 'S', 'V', 'N', 'B'];
+  function fuzzySym(t) {
+    if (!/%/.test(t)) return null;
+    const w = t.replace(/[^A-Za-z]/g, '').toLowerCase();
+    if (!w || w.length > 4) return null;
+    for (const sym of FUZZY) {
+      const k = sym.toLowerCase();
+      if (w[0] !== k[0] || w.length > k.length + 2) continue;
+      let i = 0; for (const ch of w) if (ch === k[i]) i++;
+      if (i === k.length) return sym;
+    }
+    return null;
   }
 
   function parseNum(t) {
@@ -97,9 +114,16 @@
     // 1) zaglavlja kemijske analize: redak s barem 4 različita simbola elemenata
     lines.forEach((L, li) => {
       const cols = [];
-      L.tokens.forEach(t => { const s = normSym(t.t); if (s && !cols.some(c => c.sym === s)) cols.push({ sym: s, x: cx(t) }); });
+      let fuzzy = 0;
+      L.tokens.forEach(t => {
+        let s = normSym(t.t), fz = false;
+        if (!s) { s = fuzzySym(t.t); fz = !!s; }
+        if (s && !cols.some(c => c.sym === s)) { cols.push({ sym: s, x: cx(t), fuzzy: fz }); if (fz) fuzzy++; }
+      });
+      cols.sort((a, b) => a.x - b.x);
       const elems = cols.filter(c => !['CEV', 'CET', 'PCM'].includes(c.sym));
-      if (elems.length < 4 || !cols.some(c => c.sym === 'C') || !cols.some(c => c.sym === 'Mn')) return;
+      if (elems.length < 4 || !cols.some(c => c.sym === 'C')) return;
+      if (!cols.some(c => c.sym === 'Mn') && elems.length - fuzzy < 3) return;
       const gaps = cols.slice(1).map((c, i) => c.x - cols[i].x).filter(g => g > 0).sort((a, b) => a - b);
       const gap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 40;
       const headText = L.tokens.map(t => t.t).join(' ') + ' ' + ((lines[li - 1] && lines[li - 1].page === L.page) ? lines[li - 1].tokens.map(t => t.t).join(' ') : '');
@@ -133,7 +157,10 @@
         }
         if (used < 3 || values.C === undefined) continue;
         const firstCol = Math.min(...cols.map(c => c.x));
-        const label = words.filter(w => cx(w) < firstCol - 0.3 * gap).map(w => w.t).join(' ').trim();
+        const label = words.filter(w => cx(w) < firstCol - 0.3 * gap).map(w => w.t).join(' ').replace(/[|\[\]_]/g, ' ').replace(/\s+/g, ' ').trim();
+        // granice iz norme ili narudžbe nisu analiza
+        if (/\b(min|max|spec|specified|required|zahtjev|zahtijevano|norma|soll|limit|grenz)/i.test(label)) continue;
+        Object.keys(values).forEach(k => { const c = cols.find(q => q.sym === k); if (c && c.fuzzy && !flags[k]) flags[k] = 'simbol nesigurno pročitan'; });
         rows.push({ label: label || ('redak ' + (rows.length + 1)), values, flags, page: R.page });
       }
     });
@@ -154,7 +181,7 @@
     }
 
     // 4) oznaka čelika, broj taline, ReH
-    const gm = fullText.match(/\bS\s?(235|275|355|420|460|500|550|620|690|890|960)\s?([A-Z]{1,2}\d?[A-Z]?\d?(?:\s?\+\s?[A-Z]{1,2})?)?/);
+    const gm = fullText.match(/(?:^|[^A-Za-z0-9])[S$]\s?(235|275|355|420|460|500|550|620|690|890|960)\s?([A-Z]{1,2}\d?[A-Z]?\d?(?:\s?\+\s?[A-Z]{1,2})?)?/);   // OCR: S → $
     const grade = gm ? ('S' + gm[1] + (gm[2] ? gm[2].replace(/\s/g, '') : '')) : null;
     const hm = fullText.match(/(Heat|Cast|Charge|Schmelze|Talina|Šarža|Sarza)\s*(No\.?|Nr\.?|br\.?|number|broj)?\s*[:.#]?\s*([A-Z0-9][A-Z0-9-]{3,})/i);
     const heat = hm ? hm[3] : null;
