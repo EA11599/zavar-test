@@ -800,7 +800,9 @@
     try {
       await worker.setParameters({ tessedit_pageseg_mode: String(opts.psm || 3), preserve_interword_spaces: '1' });
       const { data } = await worker.recognize(prepped);
-      return (data.words || []).map(w => ({ t: w.text, x: w.bbox.x0, y: (w.bbox.y0 + w.bbox.y1) / 2, w: w.bbox.x1 - w.bbox.x0, h: w.bbox.y1 - w.bbox.y0, page }));
+      const toks = (data.words || []).map(w => ({ t: w.text, x: w.bbox.x0, y: (w.bbox.y0 + w.bbox.y1) / 2, w: w.bbox.x1 - w.bbox.x0, h: w.bbox.y1 - w.bbox.y0, page }));
+      toks.prepped = prepped;            // pripremljena slika, u čijim su koordinatama riječi
+      return toks;
     } finally { await worker.terminate(); }
   }
 
@@ -959,12 +961,57 @@
     } finally { await worker.terminate(); }
   }
 
+  // Ponovno čitanje vrijednosti na položajima stupaca iz zaglavlja (za tablice bez crta):
+  // svaka vrijednost čita se samo sa znamenkama u tri varijante, a glasa i prvo očitanje
+  async function refineByColumns(res, pages, label) {
+    const blocks = (res.blocks || []).filter(b => pages && pages[b.page]);
+    if (!blocks.length) return 0;
+    await loadScript(TESS);
+    const worker = await window.Tesseract.createWorker('eng', 1);
+    await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: WL_NUM });
+    let changed = 0, n = 0;
+    try {
+      for (const b of blocks) {
+        const src = pages[b.page], sc = Math.max(1, Math.min(8, 70 / Math.max(6, b.hMed)));
+        for (const r of b.rows) {
+          const row = res.rows[r.row];
+          for (const c of b.cols) {
+            if (['CEV', 'CET', 'PCM'].includes(c.sym) && row.values[c.sym] === undefined) continue;
+            const rect = { x: Math.max(0, c.x - 0.48 * b.gap), y: Math.max(0, r.y - 0.85 * b.hMed), w: 0.96 * b.gap, h: 1.7 * b.hMed };
+            if (rect.x + rect.w > src.width) rect.w = src.width - rect.x;
+            if (rect.y + rect.h > src.height) rect.h = src.height - rect.y;
+            const reads = [];
+            for (const [k, bin] of [[sc, false], [sc, true], [sc * 1.3, true]]) {
+              reads.push((await worker.recognize(cellImage(src, rect, k, bin))).data.text.replace(/\s+/g, ''));
+              if (++n % 5 === 0) cstat(`${label}: provjeravam vrijednosti (${n} očitanja)…`);
+            }
+            const prev = row.values[c.sym];
+            if (prev !== undefined) reads.push(String(prev));
+            // glasaju samo očitanja u uobičajenom rasponu elementa (zarez pročitan kao znamenka daje npr. "0611")
+            const R = window.Cert.RANGE[c.sym];
+            const ok = reads.filter(t => { const q = window.Cert.normCellNum(t); return q && (!R || parseFloat(q.s) <= R[1]); });
+            const v = window.Cert.voteNumbers(ok.length ? ok : reads);
+            if (!v) continue;
+            const fit = window.Cert.fitRange(c.sym, v.value, 1);
+            const nv = +fit.v.toPrecision(4);
+            if (prev === undefined || Math.abs(nv - prev) > 1e-9) {
+              row.values[c.sym] = nv; changed++;
+              row.flags[c.sym] = prev === undefined ? 'pročitano ponovnim čitanjem stupca' : `ispravljeno ponovnim čitanjem (bilo ${String(prev).replace('.', ',')})`;
+            }
+            if (v.agree < v.total) row.flags[c.sym] = (row.flags[c.sym] ? row.flags[c.sym] + '; ' : '') + `${v.agree} od ${v.total} očitanja se slaže`;
+          }
+        }
+      }
+    } finally { await worker.terminate(); }
+    return changed;
+  }
+
   async function readPdf(file) {
     cstat('Učitavam čitač PDF-a…');
     await loadScript(PDFJS);
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
     const doc = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
-    const tokens = []; let preview = null, ocr = false;
+    const tokens = [], pages = {}; let preview = null, ocr = false;
     for (let pn = 1; pn <= Math.min(doc.numPages, 3); pn++) {
       const page = await doc.getPage(pn);
       const vp1 = page.getViewport({ scale: 1 });
@@ -981,10 +1028,11 @@
         }
       } else {
         ocr = true;
-        tokens.push(...await ocrCanvas(cv, pn, `Stranica ${pn} je skenirana`));
+        const t = await ocrCanvas(cv, pn, `Stranica ${pn} je skenirana`);
+        tokens.push(...t); pages[pn] = t.prepped;
       }
     }
-    return { tokens, preview, ocr };
+    return { tokens, preview, ocr, pages };
   }
 
   async function readImage(file) {
@@ -995,7 +1043,7 @@
     const c = cv.getContext('2d'); c.drawImage(img, 0, 0, cv.width, cv.height);
     URL.revokeObjectURL(url);
     const tokens = await ocrCanvas(cv, 1, 'Fotografija');
-    return { tokens, preview: cv, ocr: true };
+    return { tokens, preview: cv, ocr: true, pages: { 1: tokens.prepped } };
   }
 
   const CERT_FIELDS = ['C', 'Si', 'Mn', 'Cr', 'Mo', 'Ni', 'Cu', 'V'];
@@ -1025,10 +1073,15 @@
       const res = window.Cert.parse(out.tokens);
       // Kod OCR-a: ako tablica nije pročitana ili joj nedostaju glavni elementi, čita se po ćelijama
       const weak = r => !r.rows.length || ['C', 'Si', 'Mn'].some(k => r.rows[0].values[k] === undefined);
-      if (out.ocr && weak(res)) {
+      if (out.ocr && res.rows.length) {
+        try { await refineByColumns(res, out.pages, 'Stranica'); } catch (e) { /* ostaje prvo očitanje */ }
+      }
+      // Tablica s crtama: čita se i po ćelijama, a zadržava se potpuniji rezultat
+      const hasGrid = () => detectGrid(out.preview).filter(r => r.cells.filter(c => !c.empty).length >= 4).length >= 3;
+      if (out.ocr && (weak(res) || hasGrid())) {
         try {
           const byCells = await readTableCells(out.preview, 'Stranica');
-          const cnt = rows => rows.reduce((a, r) => a + Object.keys(r.values).length, 0);
+          const cnt = rows => rows.reduce((a, r) => a + Object.keys(r.values).length, 0) + 2 * rows.length;
           if (byCells.rows.length && cnt(byCells.rows) >= cnt(res.rows)) res.rows = byCells.rows;
         } catch (e) { /* ostaje rezultat čitanja teksta */ }
       }
