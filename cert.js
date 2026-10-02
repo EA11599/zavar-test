@@ -212,7 +212,55 @@
     return { 235: 'S235JR', 355: 'S355J2', 460: 'S460M', 690: 'S690QL' }[n[1]] || null;
   }
 
-  const api = { parse, presetFor, parseNum, splitTokens, groupLines, RANGE };
+  // ---- pomoćne funkcije za čitanje tablice po ćelijama ----
+  // Simbol iz teksta jedne ćelije zaglavlja (OCR s ograničenim skupom slova)
+  function symFromCell(t) {
+    const raw = String(t || '').trim();
+    if (!raw) return null;
+    const s = normSym(raw); if (s) return s;
+    const letters = raw.replace(/[^A-Za-z]/g, '');
+    if (/%/.test(raw) || letters.length <= 2) return fuzzySym(raw.includes('%') ? raw : raw + '%');
+    return null;
+  }
+  // Normalizacija broja pročitanog iz ćelije: "0007" -> "0.007", "040" -> "0.40", ",25" -> "0.25"
+  function normCellNum(t) {
+    let s = String(t || '').replace(/\s+/g, '');
+    const lt = /^[<≤]/.test(s); s = s.replace(/^[<≤]/, '');
+    if (!s) return null;
+    if (/[.,]/.test(s)) {
+      s = s.replace(',', '.'); if (s.startsWith('.')) s = '0' + s;
+      if (!/^\d{1,2}\.\d{1,5}$/.test(s)) return null;
+    } else {
+      if (!/^\d{1,5}$/.test(s)) return null;
+      if (s.length >= 2 && s[0] === '0') s = '0.' + s.slice(1);
+    }
+    return { s, lt };
+  }
+  // Glasanje između varijanti; kraći rezultat koji je početak duljega pribraja se duljemu
+  function voteNumbers(list) {
+    const c = new Map();
+    list.forEach(t => { const n = normCellNum(t); if (n) c.set(n.s, (c.get(n.s) || 0) + 1); });
+    if (!c.size) return null;
+    const keys = [...c.keys()];
+    const score = new Map(keys.map(k => [k, c.get(k)]));
+    keys.forEach(a => keys.forEach(b => {
+      if (a !== b && b.length > a.length && b.startsWith(a) && a.includes('.')) score.set(b, score.get(b) + c.get(a));
+    }));
+    let best = null; score.forEach((v, k) => { if (!best || v > best.v || (v === best.v && k.length > best.k.length)) best = { k, v }; });
+    const total = list.length;
+    // slaganje = koliko je očitanja dalo točno odabranu vrijednost (bez pribrojenih kraćih)
+    return { value: parseFloat(best.k), text: best.k, agree: c.get(best.k), total };
+  }
+  function voteSymbols(list) {
+    const c = new Map();
+    list.forEach(t => { const s = symFromCell(t); if (s) c.set(s, (c.get(s) || 0) + 1); });
+    let best = null; c.forEach((v, k) => { if (!best || v > best.v) best = { k, v }; });
+    return best ? best.k : null;
+  }
+  const SPEC_ROW = /\b(min|max|spec|specified|required|zahtjev|zahtijevano|norma|soll|limit|grenz)/i;
+
+  const api = { parse, presetFor, parseNum, splitTokens, groupLines, RANGE,
+    symFromCell, normCellNum, voteNumbers, voteSymbols, fitRange, SPEC_ROW };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Cert = api;
 })(typeof window !== 'undefined' ? window : globalThis);

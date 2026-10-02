@@ -804,6 +804,161 @@
     } finally { await worker.terminate(); }
   }
 
+  /* ---- čitanje tablice po ćelijama ----
+   * 1) na binarnoj slici traže se crte tablice i iz njih ćelije,
+   * 2) zaglavlje se čita s dopuštenim slovima simbola, vrijednosti samo sa znamenkama,
+   * 3) svaka ćelija čita se u nekoliko varijanti (povećanje, sivo ili crno-bijelo), a rezultat se bira glasanjem. */
+  const WL_NUM = '0123456789.,<', WL_SYM = 'ABCEFIMNOPSTVWZabeilnoqrstuv%()';
+
+  function grayOf(canvas) {
+    const c = canvas.getContext('2d', { willReadFrequently: true });
+    const d = c.getImageData(0, 0, canvas.width, canvas.height).data, n = canvas.width * canvas.height;
+    const g = new Uint8Array(n);
+    for (let i = 0; i < n; i++) g[i] = (0.299 * d[4 * i] + 0.587 * d[4 * i + 1] + 0.114 * d[4 * i + 2]) | 0;
+    return g;
+  }
+  function otsu(g) {
+    const hist = new Uint32Array(256); for (const v of g) hist[v]++;
+    let sum = 0; for (let t = 0; t < 256; t++) sum += t * hist[t];
+    let wB = 0, sB = 0, best = -1, th = 128;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t]; if (!wB) continue; const wF = g.length - wB; if (!wF) break;
+      sB += t * hist[t]; const m = sB / wB - (sum - sB) / wF, v = wB * wF * m * m; if (v > best) { best = v; th = t; }
+    }
+    return th;
+  }
+  function scaled(src, rect, sc) {
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(rect.w * sc)); cv.height = Math.max(1, Math.round(rect.h * sc));
+    const c = cv.getContext('2d', { willReadFrequently: true });
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.drawImage(src, rect.x, rect.y, rect.w, rect.h, 0, 0, cv.width, cv.height);
+    return cv;
+  }
+  // Slika jedne ćelije za OCR: povećana, pojačan kontrast, po želji crno-bijela, s bijelim rubom
+  function cellImage(src, rect0, sc, bin) {
+    // ćelija se sužava prema unutra da ostaci crta tablice ne uđu u OCR
+    const mx = Math.max(1.2, rect0.w * 0.04), my = Math.max(1, rect0.h * 0.1);
+    const rect = { x: rect0.x + mx, y: rect0.y + my, w: Math.max(2, rect0.w - 2 * mx), h: Math.max(2, rect0.h - 2 * my) };
+    const cv = scaled(src, rect, sc), w = cv.width, h = cv.height;
+    const g = grayOf(cv); let lo = 255, hi = 0; for (const v of g) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    const th = bin ? otsu(g) : 0, span = Math.max(1, hi - lo);
+    const pad = 30, out = document.createElement('canvas'); out.width = w + 2 * pad; out.height = h + 2 * pad;
+    const oc = out.getContext('2d'); oc.fillStyle = '#fff'; oc.fillRect(0, 0, out.width, out.height);
+    const im = oc.createImageData(w, h);
+    for (let i = 0; i < g.length; i++) {
+      const v = bin ? (g[i] <= th ? 0 : 255) : Math.round((g[i] - lo) * 255 / span);
+      im.data[4 * i] = im.data[4 * i + 1] = im.data[4 * i + 2] = v; im.data[4 * i + 3] = 255;
+    }
+    oc.putImageData(im, pad, pad);
+    return out;
+  }
+
+  // Pronalazak redaka i ćelija iz crta tablice
+  function detectGrid(src) {
+    const s = Math.max(1, Math.min(8, 2000 / src.width));
+    const cv = scaled(src, { x: 0, y: 0, w: src.width, h: src.height }, s), W2 = cv.width, H2 = cv.height;
+    const g = grayOf(cv), th = otsu(g), dark = new Uint8Array(g.length);
+    for (let i = 0; i < g.length; i++) dark[i] = g[i] <= th ? 1 : 0;
+    const cluster = (arr, gap) => { const out = []; arr.forEach(v => { const L = out[out.length - 1]; if (L && v - L[1] <= gap) L[1] = v; else out.push([v, v]); }); return out; };
+    const hRows = [];
+    for (let y = 0; y < H2; y++) {
+      let run = 0, mx = 0;
+      for (let x = 0; x < W2; x++) { if (dark[y * W2 + x]) { run++; if (run > mx) mx = run; } else run = 0; }
+      if (mx >= 0.25 * W2) hRows.push(y);
+    }
+    const HL = cluster(hRows, Math.max(3, Math.round(s)));
+    const rows = [];
+    for (let i = 0; i < HL.length - 1; i++) {
+      const y0 = HL[i][1] + 1, y1 = HL[i + 1][0] - 1, bh = y1 - y0;
+      if (bh < 10 || bh > 0.25 * H2) continue;
+      const cut = Math.max(1, Math.round(bh * 0.08)), vx = [];
+      for (let x = 0; x < W2; x++) {
+        let c = 0; for (let y = y0 + cut; y <= y1 - cut; y++) c += dark[y * W2 + x];
+        if (c >= 0.85 * (bh - 2 * cut + 1)) vx.push(x);
+      }
+      const VL = cluster(vx, Math.max(2, Math.round(s)));
+      const edges = [[-1, -1], ...VL, [W2, W2]], cells = [];
+      for (let k = 0; k < edges.length - 1; k++) {
+        const x0 = edges[k][1] + 1, x1 = edges[k + 1][0] - 1;
+        if (x1 - x0 < 8 * s) continue;
+        let ink = 0; const iy0 = y0 + cut, iy1 = y1 - cut, ix0 = x0 + cut, ix1 = x1 - cut;
+        for (let y = iy0; y <= iy1; y++) for (let x = ix0; x <= ix1; x++) ink += dark[y * W2 + x];
+        const area = Math.max(1, (iy1 - iy0 + 1) * (ix1 - ix0 + 1));
+        cells.push({ x: x0 / s, y: y0 / s, w: (x1 - x0 + 1) / s, h: (y1 - y0 + 1) / s, cx: (x0 + x1) / 2 / s, empty: ink / area < 0.004 });
+      }
+      if (cells.length >= 3) rows.push({ y: y0 / s, h: bh / s, cells });
+    }
+    return rows;
+  }
+
+  async function readTableCells(src, label) {
+    const rows = detectGrid(src);
+    if (!rows.length) return { rows: [] };
+    await loadScript(TESS);
+    const worker = await window.Tesseract.createWorker('eng', 1);
+    let mode = null;
+    const setMode = async (wl) => { if (mode === wl) return; mode = wl; await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: wl }); };
+    const ocr = async (img) => (await worker.recognize(img)).data.text.replace(/\s+/g, ' ').trim();
+    const scFor = cell => Math.max(1, Math.min(14, 100 / Math.max(4, cell.h)));
+    const variants = cell => { const s = scFor(cell); return [[s, false], [s, true], [s * 1.35, true]]; };
+    let calls = 0; const tick = () => { calls++; if (calls % 5 === 0) cstat(`${label}: čitam tablicu po ćelijama (${calls} očitanja)…`); };
+    try {
+      // 1) zaglavlje: redak s barem četiri simbola elemenata, uključujući C
+      let header = null, hi = -1;
+      for (let r = 0; r < rows.length && !header; r++) {
+        const cells = rows[r].cells.filter(c => !c.empty);
+        if (cells.length < 5) continue;
+        await setMode(WL_SYM);
+        const first = [];
+        for (const c of cells) { tick(); first.push(window.Cert.symFromCell(await ocr(cellImage(src, c, scFor(c), true)))); }
+        if (first.filter(Boolean).length < 3) continue;
+        const cols = [];
+        for (const c of cells) {
+          const reads = [];
+          for (const [sc, bin] of variants(c)) { tick(); reads.push(await ocr(cellImage(src, c, sc, bin))); }
+          const sym = window.Cert.voteSymbols(reads);
+          if (sym && !cols.some(q => q.sym === sym)) cols.push({ sym, cell: c });
+        }
+        if (cols.length >= 4 && cols.some(q => q.sym === 'C')) { header = cols; hi = r; }
+      }
+      if (!header) return { rows: [] };
+      const firstX = Math.min(...header.map(q => q.cell.x));
+      // 2) retci vrijednosti ispod zaglavlja
+      const out = [];
+      for (let r = hi + 1; r < Math.min(rows.length, hi + 9); r++) {
+        const row = rows[r];
+        if (row.y - (rows[r - 1].y + rows[r - 1].h) > 3 * row.h) break;      // razmak: nova tablica
+        await setMode('');
+        const labCells = row.cells.filter(c => !c.empty && c.x + c.w <= firstX + 2);
+        let lab = '';
+        for (const c of labCells) { tick(); lab += ' ' + await ocr(cellImage(src, c, scFor(c), true)); }
+        lab = lab.replace(/[|\[\]_]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (window.Cert.SPEC_ROW.test(lab)) continue;
+        await setMode(WL_NUM);
+        const values = {}, flags = {};
+        let found = 0;
+        for (const col of header) {
+          const c = row.cells.find(q => q.x <= col.cell.cx && q.x + q.w >= col.cell.cx);
+          if (!c || c.empty) continue;
+          const reads = [];
+          for (const [sc, bin] of variants(c)) { tick(); reads.push(await ocr(cellImage(src, c, sc, bin))); }
+          const v = window.Cert.voteNumbers(reads);
+          if (!v) continue;
+          const fit = window.Cert.fitRange(col.sym, v.value, 1);
+          values[col.sym] = +fit.v.toPrecision(4); found++;
+          if (fit.f !== 1) flags[col.sym] = 'preračunato ×' + fit.f;
+          if (v.agree < v.total) flags[col.sym] = `nesigurno pročitano (${v.agree} od ${v.total} očitanja se slaže)`;
+          if (fit.bad) flags[col.sym] = 'izvan uobičajenog raspona';
+        }
+        if (found < 2) { if (out.length) break; else continue; }
+        if (values.C === undefined) continue;
+        out.push({ label: lab || ('redak ' + (out.length + 1)), values, flags, page: 1 });
+      }
+      return { rows: out };
+    } finally { await worker.terminate(); }
+  }
+
   async function readPdf(file) {
     cstat('Učitavam čitač PDF-a…');
     await loadScript(PDFJS);
@@ -868,6 +1023,15 @@
       const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
       const out = isPdf ? await readPdf(file) : await readImage(file);
       const res = window.Cert.parse(out.tokens);
+      // Kod OCR-a: ako tablica nije pročitana ili joj nedostaju glavni elementi, čita se po ćelijama
+      const weak = r => !r.rows.length || ['C', 'Si', 'Mn'].some(k => r.rows[0].values[k] === undefined);
+      if (out.ocr && weak(res)) {
+        try {
+          const byCells = await readTableCells(out.preview, 'Stranica');
+          const cnt = rows => rows.reduce((a, r) => a + Object.keys(r.values).length, 0);
+          if (byCells.rows.length && cnt(byCells.rows) >= cnt(res.rows)) res.rows = byCells.rows;
+        } catch (e) { /* ostaje rezultat čitanja teksta */ }
+      }
       CERTP = { res, ocr: out.ocr, name: file.name, canvas: out.preview, sel: null };
       $('certPrev').innerHTML = '<div class="selbox" id="certSel" hidden></div>';
       out.preview.setAttribute('aria-label', 'Pregled certifikata; mišem se može označiti tablica kemijskog sastava');
@@ -918,8 +1082,11 @@
     crop.getContext('2d').drawImage(CERTP.canvas, s.x, s.y, s.w, s.h, 0, 0, crop.width, crop.height);
     $('certCrop').disabled = true;
     try {
-      const toks = await ocrCanvas(crop, 1, 'Označeno područje', { psm: 6, targetW: 3200, maxScale: 10, hLine: 0.15, vLine: 0.45 });
-      const r2 = window.Cert.parse(toks);
+      let r2 = await readTableCells(crop, 'Označeno područje');
+      if (!r2.rows.length) {
+        const toks = await ocrCanvas(crop, 1, 'Označeno područje', { psm: 6, targetW: 3200, maxScale: 10, hLine: 0.15, vLine: 0.45 });
+        r2 = window.Cert.parse(toks);
+      }
       if (r2.rows.length) {
         CERTP.res.rows = r2.rows; CERTP.ocr = true;
         if (Number.isFinite(r2.cev)) CERTP.res.cev = r2.cev;
