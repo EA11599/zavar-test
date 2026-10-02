@@ -18,7 +18,7 @@
     <p>Upiši stvarne uvjete na radnom mjestu i parametre iz WPS-a. Program računa toplinski ciklus, tvrdoću ZUT-a, potrebno predgrijavanje i raspodjelu zaostalih naprezanja, procjenjuje rizik i predlaže korekciju parametara.</p>
   </div>
   <div class="head-actions">
-    <div class="stamp">Demo verzija 2</div>
+    <div class="stamp">Demo verzija 3</div>
     <div class="row">
       <button type="button" class="toggle-notes" id="toggleNotes" aria-pressed="false">Prikaži sve napomene</button>
       <button type="button" class="ghost" id="printBtn">Ispiši izvještaj</button>
@@ -29,7 +29,7 @@
 <nav class="jump" aria-label="Dijelovi stranice">
   <a href="#procjena">Procjena</a>
   <a href="#polje">Temperaturno polje</a>
-  <a href="#naprezanja">Zaostala naprezanja</a>
+  <a href="#naprezanja">Modeli naprezanja</a>
   <a href="#prozor">Procesni prozor</a>
   <a href="#usporedba">Sunce i sjena</a>
   <a href="#dnevnik">Dnevnik zavara</a>
@@ -63,6 +63,27 @@
 
     <fieldset>
       <legend>Materijal i spoj</legend>
+      <div class="cert noprint">
+        <div class="row">
+          <label class="filebtn">Učitaj certifikat materijala<input type="file" id="certFile" accept=".pdf,application/pdf,image/*" class="sr"></label>
+          <a href="primjer-certifikata.pdf" download class="hint" style="margin:0">Preuzmi primjer certifikata</a>
+        </div>
+        <p class="hint" id="certStatus" role="status">PDF ili fotografija certifikata prema EN 10204 (3.1). Obrada se radi u pregledniku; datoteka se nikamo ne šalje.</p>
+        <div id="certPanel" class="certpanel" hidden>
+          <div class="certprev" id="certPrev"></div>
+          <div class="certdata">
+            <p class="computed" id="certMeta"></p>
+            <label id="certRowWrap">Redak analize<select id="certRow"></select></label>
+            <div class="fields chem" id="certChem"></div>
+            <p class="warnline" id="certWarn"></p>
+            <div class="row" style="margin-top:10px">
+              <button type="button" id="certApply">Upiši u obrazac</button>
+              <button type="button" class="ghost" id="certCancel">Odustani</button>
+            </div>
+          </div>
+        </div>
+        <p class="computed" id="certInfo"></p>
+      </div>
       <div class="fields">
         <label>Materijal
           <select id="mat">
@@ -74,6 +95,8 @@
         </label>
         <label>Granica tečenja Re, MPa<input type="number" id="Re" value="355" min="100"></label>
         <label>Debljina lima, mm<input type="number" id="d" value="12" min="2" step="1"></label>
+        <label>Ukupna širina ploča B, mm<input type="number" id="B" value="300" min="20" step="10"></label>
+        <label>Duljina zavara L, mm<input type="number" id="L" value="500" min="20" step="10"></label>
         <label>Vrsta spoja
           <select id="joint"><option value="butt">Sučeljeni</option><option value="fillet">Kutni (T-spoj)</option></select>
         </label>
@@ -102,6 +125,7 @@
         <p>Odabirom materijala upisuju se tipične vrijednosti. U stvarnoj primjeni sastav i Re preuzimaju se iz certifikata materijala (EN 10204 3.1). Iz sastava se računaju dva ekvivalenta ugljika:</p>
         <div class="f">CE = C + Mn/6 + (Cr + Mo + V)/5 + (Ni + Cu)/15 &nbsp;&nbsp;(IIW)</div>
         <div class="f">CET = C + (Mn + Mo)/10 + (Cr + Cu)/20 + Ni/40 &nbsp;&nbsp;(EN 1011-2)</div>
+        <p><b>Učitavanje certifikata:</b> iz PDF-a s tekstom čita se tekst s položajima, a skenirani PDF ili fotografija prolaze prepoznavanje teksta (OCR). Program traži redak sa simbolima elemenata (C, Si, Mn…), vrijednosti ispod njih pridružuje stupcima po položaju, prepoznaje zapise ×100 i ×1000 te izdvaja CEV, oznaku čelika, broj taline i ReH. Pročitane vrijednosti uvijek treba provjeriti prije upisa, osobito kod OCR-a.</p>
         <p>Ciljani raspon t8/5 i najveća temperatura komada (npr. 200 °C za poboljšane čelike) orijentacijske su vrijednosti; u radu ih treba povezati s preporukama proizvođača čelika.</p>
       </details>
     </fieldset>
@@ -226,15 +250,38 @@
 
 <!-- ============ ZAOSTALA NAPREZANJA ============ -->
 <section class="block" id="naprezanja">
-  <h2>Raspodjela uzdužnih zaostalih naprezanja</h2>
-  <p class="lead">Poprečni presjek preko zavara: vlačna naprezanja uz šav i tlačna u ostatku ploče. Širina vlačne zone mijenja se s unosom topline i debljinom.</p>
+  <h2>Modeli zaostalih naprezanja</h2>
+  <p class="lead">Usporedba analitičkih modela uzdužnih i poprečnih zaostalih naprezanja, uz mogućnost učitavanja rezultata MKE simulacije iz CalculiX-a na iste dijagrame.</p>
   <div class="sheet">
-    <div class="chartbox"><svg id="stress" viewBox="0 0 760 300" role="img" aria-label="Raspodjela uzdužnih zaostalih naprezanja poprečno na zavar"></svg></div>
+    <h3 class="sh">Uzdužna naprezanja σx, poprečno preko zavara</h3>
+    <div class="row noprint" style="padding:12px 18px 0" role="group" aria-label="Modeli">
+      <label class="check" style="grid-column:auto"><input type="checkbox" id="smMM" checked> Masubuchi i Martin</label>
+      <label class="check" style="grid-column:auto"><input type="checkbox" id="smOK" checked> Okerblom</label>
+    </div>
+    <div class="chartbox"><svg id="stress" viewBox="0 0 760 320" role="img" aria-label="Raspodjela uzdužnih zaostalih naprezanja poprečno na zavar"></svg></div>
+    <div class="tablewrap" style="padding:0 18px"><table class="t" id="stressTable"></table></div>
+    <p class="warnline" id="stressWarn" style="padding:0 18px"></p>
+    <h3 class="sh" style="border-top:1px solid var(--line);margin-top:14px">Poprečna naprezanja σy, duž zavara</h3>
+    <div class="chartbox"><svg id="stressT" viewBox="0 0 760 270" role="img" aria-label="Poprečna zaostala naprezanja duž zavara"></svg></div>
     <p class="readout" id="stressOut"></p>
-    <details class="how"><summary>Kako se računa raspodjela</summary>
-      <p>Oblik raspodjele preuzet je iz modela Masubuchija i Martina, koji je samouravnotežen po širini ploče:</p>
+    <div class="fem noprint">
+      <b>Rezultati iz CalculiX-a</b>
+      <div class="row" style="margin-top:8px">
+        <select id="femKind" aria-label="Vrsta podataka"><option value="x">Uzdužni profil: y (mm), σx (MPa)</option><option value="y">Duž zavara: x (mm), σy (MPa)</option></select>
+        <label class="filebtn">Učitaj CSV<input type="file" id="femFile" accept=".csv,.txt,text/csv,text/plain" class="sr"></label>
+        <button type="button" class="ghost" id="femClear">Ukloni učitano</button>
+      </div>
+      <p class="hint" id="femStatus" role="status">Dva stupca: udaljenost u mm i naprezanje u MPa. Razdjelnik može biti točka-zarez, zarez, tabulator ili razmak.</p>
+    </div>
+    <details class="how"><summary>Kako se računaju modeli</summary>
+      <p><b>Masubuchi i Martin.</b> Oblik raspodjele je samouravnotežen po širini ploče:</p>
       <div class="f">σₓ(y) = σₘ · [1 − (y/b)²] · exp[−½ (y/b)²]</div>
       <p>Najveće naprezanje σₘ uzima se jednako granici tečenja. Poluširina vlačne zone b određuje se iz Rosenthalovog polja kao udaljenost na kojoj vršni porast temperature dostiže 2·Re/(E·α), tj. dvostruku elastičnu toplinsku deformaciju (pojednostavljeni kriterij plastifikacije).</p>
+      <p><b>Okerblom.</b> Vlačna zona ima naprezanje jednako granici tečenja, a njezina širina slijedi iz uvjeta da vršni porast temperature (Rosenthal, 2D) doseže Re/(E·α):</p>
+      <div class="f">2b = 0,484 · q / (v · d · cρ · ΔT<sub>y</sub>), &nbsp; ΔT<sub>y</sub> = Re / (E·α)</div>
+      <p>Tlak je jednoliko raspodijeljen po ostatku širine ploča B, tako da je neto sila nula. Uzdužna sila skupljanja jednaka je F = Re · 2b · d. Model je izveden za tanke ploče; za 3D odvođenje topline program ispisuje upozorenje.</p>
+      <p><b>Poprečna naprezanja duž zavara.</b> Kod slobodnih ploča poprečna naprezanja su vlačna u sredini zavara, a tlačna na krajevima, uz neto silu nula. Program koristi oblik σ<sub>y</sub> = σ<sub>A</sub>·(1 − 3ξ²), ξ = 2x/L − 1, uz σ<sub>A</sub> = 0,2·Re. Ukliještenost dodaje jednoliko reaktivno naprezanje (0; 0,25 ili 0,5·Re za malu, srednju i veliku ukliještenost). Amplitude su pretpostavke koje treba kalibrirati MKE simulacijom i mjerenjima.</p>
+      <p><b>Rezultati iz CalculiX-a</b> učitavaju se kao CSV s dva stupca, npr. naprezanja duž poprečne linije na sredini zavara, izvezena iz rezultata (.frd) Python skriptom. Prikazuju se na istom dijagramu kao analitički modeli.</p>
       <p>Ograničenja: ne uzima se u obzir fazna pretvorba (važno za poboljšane čelike poput S690QL, gdje martenzitna pretvorba smanjuje vlačna naprezanja u šavu), ovisnost Re o temperaturi ni ukliještenost. Rezultate treba usporediti s mjerenjima i s MKE simulacijom.</p>
     </details>
   </div>
@@ -329,7 +376,7 @@
   <h2>Plan razvoja</h2>
   <p class="lead">Ova stranica je prva faza. Pojednostavljena pravila procjene u kasnijim fazama zamjenjuju rezultati MKE simulacija i model treniran na eksperimentalnim podacima.</p>
   <ol class="steps">
-    <li class="now"><b>Kalkulator i sučelje</b><span>EN 1011-2 (t8/5, predgrijavanje CET), tvrdoća ZUT-a, Rosenthalovo polje, raspodjela naprezanja, procesni prozor, dnevnik zavara.</span>
+    <li class="now"><b>Kalkulator i sučelje</b><span>EN 1011-2 (t8/5, predgrijavanje CET), tvrdoća ZUT-a, Rosenthalovo polje, modeli zaostalih naprezanja, učitavanje certifikata, procesni prozor, dnevnik zavara.</span>
       <details class="how"><summary>Kako se radi</summary><p>Web-aplikacija u HTML-u i JavaScriptu, bez instalacije, objavljena preko GitHub Pages. Izračuni su u zasebnom modulu pokrivenom automatskim testovima, pa sučelje ostaje isto dok se "mozak" u pozadini mijenja.</p></details></li>
     <li><b>MKE simulacija u CalculiX-u</b><span>Toplinsko-mehanička simulacija zavarivanja kojom se umjesto pretpostavke dobiva stvarna raspodjela temperatura i zaostalih naprezanja.</span>
       <details class="how"><summary>Kako se radi</summary>
@@ -355,6 +402,7 @@
 </div>
 
 <script src="physics.js"></script>
+<script src="cert.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

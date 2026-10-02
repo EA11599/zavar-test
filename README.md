@@ -11,7 +11,8 @@ Stranica: https://ea11599.github.io/zavar-demo/
 - najveću tvrdoću ZUT-a (model Yurioke i sur.) s granicom iz EN ISO 15614-1
 - rosište (Magnusova formula) i rizik od kondenzacije
 - temperaturno polje pomičnog izvora i toplinski ciklus (Rosenthalovo rješenje, animirano)
-- raspodjelu uzdužnih zaostalih naprezanja (oblik prema Masubuchiju i Martinu)
+- modele zaostalih naprezanja: uzdužno (Masubuchi i Martin, Okerblom) i poprečno duž zavara, uz uvoz rezultata iz CalculiX-a (CSV)
+- čitanje certifikata materijala (EN 10204 3.1) iz PDF-a ili fotografije: sastav, CEV, oznaka čelika, talina, ReH
 - procesni prozor: kartu rizika u ravnini struja–brzina
 - indeks rizika i preporuku parametara unutar ±25 % unosa topline
 - dnevnik zavara s unosom izmjerenih rezultata, izvozom i uvozom CSV-a
@@ -25,8 +26,11 @@ Indeks rizika i raspodjela naprezanja su pojednostavljeni modeli za prikaz ideje
 | `index.html` | struktura stranice i napomene |
 | `style.css` | izgled |
 | `physics.js` | svi izračuni, bez ovisnosti o sučelju |
-| `app.js` | sučelje, grafikoni, animacija, dnevnik |
+| `app.js` | sučelje, grafikoni, animacija, dnevnik, certifikat |
+| `cert.js` | prepoznavanje sastava i CEV-a u certifikatu |
+| `primjer-certifikata.pdf` | izmišljeni certifikat za isprobavanje |
 | `tests/physics.test.js` | automatski testovi izračuna |
+| `tests/cert.test.js` | automatski testovi čitanja certifikata |
 
 ## Pokretanje i testovi
 
@@ -35,7 +39,7 @@ Stranica radi bez instalacije: otvori `index.html` u pregledniku (sve datoteke m
 Testovi izračuna (potreban Node.js 18 ili noviji):
 
 ```
-node --test tests/physics.test.js
+node --test tests/physics.test.js tests/cert.test.js
 ```
 
 Testovi provjeravaju, između ostalog, da se Rosenthalovo rješenje poklapa s izrazima za t8/5 iz EN 1011-2.

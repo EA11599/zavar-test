@@ -170,3 +170,16 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted);border-top:1px solid 
   body{font-size:12px}
 }
 button.seg:disabled{opacity:.45;cursor:not-allowed}
+
+/* certifikat i MKE */
+.cert{clear:both;margin:0 0 14px;padding-bottom:12px;border-bottom:1px dashed var(--line)}
+label.filebtn{flex-direction:row;cursor:pointer;border:1px solid var(--ink);background:var(--ink);color:var(--panel);padding:8px 14px;font-weight:600;font-size:.95rem}
+label.filebtn:focus-within{outline:3px solid var(--blue);outline-offset:1px}
+.certpanel{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;margin-top:10px;padding:12px;background:var(--bg);border:1px solid var(--line)}
+.certprev{max-height:320px;overflow:auto;border:1px solid var(--line);background:#fff}
+.certprev canvas,.certprev img{display:block;width:100%;height:auto}
+.certdata .fields.chem label.flag input{border-color:var(--warn);border-width:2px}
+.fem{padding:12px 18px 14px;border-top:1px dashed var(--line);margin-top:6px}
+.fem select{width:auto}
+.legend-inline{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.85rem;color:var(--muted);padding:0 18px}
+.legend-inline i{display:inline-block;width:18px;height:3px;vertical-align:4px;margin-right:6px}

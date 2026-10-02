@@ -34,7 +34,7 @@
     const comp = {}; CHEM.forEach(k => { comp[k] = g('c' + k); });
     return {
       T0: g('T0'), Ta: g('Ta'), RH: g('RH'), Re: g('Re'), d: g('d'), joint: $('joint').value,
-      restr: $('restr').value, proc: $('proc').value, HD: g('HD'), I: g('I'), U: g('U'), v: g('v'),
+      restr: $('restr').value, proc: $('proc').value, B: g('B'), L: g('L'), HD: g('HD'), I: g('I'), U: g('U'), v: g('v'),
       TpWPS: g('TpWPS'), tmin: g('tmin'), tmax: g('tmax'), Tmax: g('Tmax'),
       group: W.MAT[$('mat').value].group, mat: $('mat').value, comp, coupleU: $('coupleU').checked
     };
@@ -43,11 +43,12 @@
   function invalid(p) {
     const need = { T0: 'temperatura komada', Ta: 'okolna temperatura', RH: 'relativna vlažnost', Re: 'granica tečenja',
       d: 'debljina lima', I: 'struja', U: 'napon', v: 'brzina zavarivanja', TpWPS: 'propisano predgrijavanje',
-      tmin: 'ciljani t8/5 od', tmax: 'ciljani t8/5 do', Tmax: 'najveća temperatura komada' };
+      B: 'širina ploča', L: 'duljina zavara', tmin: 'ciljani t8/5 od', tmax: 'ciljani t8/5 do', Tmax: 'najveća temperatura komada' };
     for (const k in need) if (!Number.isFinite(p[k])) return 'Upiši vrijednost: ' + need[k] + '.';
     for (const k of CHEM) if (!Number.isFinite(p.comp[k]) || p.comp[k] < 0) return 'Upiši udio elementa ' + k + ' (0 ili više).';
     if (p.comp.C <= 0 || p.comp.C > 0.5) return 'Udio ugljika mora biti između 0 i 0,5 %.';
     if (p.d <= 0 || p.I <= 0 || p.U <= 0 || p.v <= 0) return 'Debljina, struja, napon i brzina moraju biti veći od nule.';
+    if (p.B < 20 || p.L < 20) return 'Širina ploča i duljina zavara moraju biti barem 20 mm.';
     if (p.RH < 1 || p.RH > 100) return 'Relativna vlažnost mora biti između 1 i 100 %.';
     if (p.T0 >= 450) return 'Temperatura komada mora biti ispod 450 °C.';
     if (p.tmin >= p.tmax) return 'Ciljani t8/5 "od" mora biti manji od "do".';
@@ -55,7 +56,9 @@
   }
 
   /* ---------------- stanje ---------------- */
-  let P = null, E = null, REC = null, ST = null;
+  let P = null, E = null, REC = null, ST = null, SM = null;
+  const FEM = { x: null, y: null };
+  let CERT = null;   // podaci iz potvrđenog certifikata
   let probeY = 3, probeAuto = true;
   let pwMode = 'meas';
 
@@ -87,7 +90,7 @@
     ['mQ', 'mT85', 'mHV', 'mTp', 'mDew', 'mB'].forEach(id => { $(id).textContent = '–'; });
     $('causes').innerHTML = ''; $('cetWarn').textContent = ''; $('ceOut').textContent = '';
     $('reco').innerHTML = '<p class="note">Preporuka će se prikazati kad su svi ulazni podaci ispravni.</p>';
-    ['cycle', 'stress', 'chart'].forEach(id => { $(id).innerHTML = ''; });
+    ['cycle', 'stress', 'stressT', 'chart', 'stressTable'].forEach(id => { $(id).innerHTML = ''; });
     $('cycleOut').textContent = ''; $('stressOut').textContent = ''; $('dA').innerHTML = ''; $('dB').innerHTML = '';
     const c = $('pw').getContext('2d'); c.clearRect(0, 0, 760, 420);
   }
@@ -110,7 +113,8 @@
     $('mDew').textContent = fmt(e.Td, 1);
     $('mB').textContent = fmt(2 * ST.b, 0);
     $('cetWarn').textContent = e.cetWarn.length ? 'Izraz za predgrijavanje primijenjen izvan područja valjanosti: ' + e.cetWarn.join(', ') + '.' : '';
-    $('ceOut').innerHTML = `CE = <b>${fmt(e.CE, 2)}</b>, CET = <b>${fmt(e.CET, 2)}</b>, skupina materijala ${p.group}`;
+    $('ceOut').innerHTML = `CE = <b>${fmt(e.CE, 2)}</b>, CET = <b>${fmt(e.CET, 2)}</b>, skupina materijala ${p.group}` +
+      (CERT && Number.isFinite(CERT.cev) ? `; CEV s certifikata = <b>${fmt(CERT.cev, 2)}</b>${Math.abs(CERT.cev - e.CE) > 0.02 ? ' (razlika od izračunatog veća od 0,02: provjeri sastav)' : ''}` : '');
     $('causes').innerHTML = e.causes.map(c => `
       <div class="cause"><span>${c.k}</span>
       <div class="bar" title="${Math.round(c.r * 100)} %"><i style="width:${Math.round(c.r * 100)}%"></i></div></div>`).join('');
@@ -206,31 +210,76 @@
 
   /* ---------------- zaostala naprezanja ---------------- */
   function renderStress() {
-    const st = ST, p = P;
-    const ym = clamp(Math.ceil(4 * st.b / 10) * 10, 30, 150);
-    const o = { W: 760, H: 300, L: 56, R: 16, T: 16, B: 40, x0: -ym, x1: ym, y0: -0.6 * p.Re, y1: 1.15 * p.Re };
-    o.xt = ticks(-ym, ym, 8); o.yt = ticks(o.y0, o.y1, 6); o.xl = 'udaljenost od osi zavara, mm'; o.yl = 'σx, MPa';
+    const p = P, M = W.stressModels(p, p.T0); SM = M;
+    const bronze = css('--bronze'), blue = css('--blue'), ink = css('--ink'), straw = css('--straw'), muted = css('--muted');
+    const showMM = $('smMM').checked, showOK = $('smOK').checked;
+    const half = p.B / 2;
+    // --- uzdužno ---
+    const ym = Math.min(half, Math.max(4 * M.MM.b, 1.3 * M.OK.b, 30));
+    const femX = FEM.x && FEM.x.length ? FEM.x : null;
+    let yLo = -0.6 * p.Re, yHi = 1.15 * p.Re;
+    if (femX) femX.forEach(q => { yLo = Math.min(yLo, q[1] * 1.1); yHi = Math.max(yHi, q[1] * 1.1); });
+    const o = { W: 760, H: 320, L: 56, R: 16, T: 40, B: 40, x0: -ym, x1: ym, y0: yLo, y1: yHi };
+    o.xt = ticks(-ym, ym, 8); o.yt = ticks(o.y0, o.y1, 6); o.xl = 'udaljenost od osi zavara y, mm'; o.yl = 'σx, MPa';
     const A = axes(o); let s = A.s;
-    const bronze = css('--bronze'), blue = css('--blue'), ink = css('--ink'), straw = css('--straw');
-    // talina
-    s += `<rect x="${A.X(-st.yF)}" y="${o.T}" width="${A.X(st.yF) - A.X(-st.yF)}" height="${o.H - o.T - o.B}" fill="${straw}" opacity=".35"/>`;
-    const pos = [], neg = [], all = [];
-    for (let i = 0; i <= 300; i++) {
-      const y = -ym + 2 * ym * i / 300, sv = st.at(y);
-      all.push([A.X(y), A.Y(sv)]);
-      pos.push([A.X(y), A.Y(Math.max(sv, 0))]); neg.push([A.X(y), A.Y(Math.min(sv, 0))]);
+    s += `<rect x="${A.X(-M.MM.yF || -ST.yF)}" y="${o.T}" width="${A.X(ST.yF) - A.X(-ST.yF)}" height="${o.H - o.T - o.B}" fill="${straw}" opacity=".35"/>`;
+    s += `<text x="${A.X(0)}" y="${o.T + 12}" text-anchor="middle">talina</text>`;
+    s += `<line x1="${o.L}" x2="${o.W - o.R}" y1="${A.Y(0)}" y2="${A.Y(0)}" stroke="${ink}" opacity=".6"/>`;
+    s += `<line x1="${o.L}" x2="${o.W - o.R}" y1="${A.Y(p.Re)}" y2="${A.Y(p.Re)}" stroke="${muted}" stroke-dasharray="2 4"/><text x="${o.L + 6}" y="${A.Y(p.Re) - 5}">Re = ${fmt(p.Re, 0)} MPa</text>`;
+    const curve = (f, col, w, dash) => {
+      const pts = [];
+      for (let i = 0; i <= 600; i++) { const y = -ym + 2 * ym * i / 600, v = f(y); if (Number.isFinite(v)) pts.push(A.X(y).toFixed(1) + ',' + A.Y(v).toFixed(1)); }
+      return `<polyline fill="none" stroke="${col}" stroke-width="${w}" ${dash ? `stroke-dasharray="${dash}"` : ''} stroke-linejoin="round" points="${pts.join(' ')}"/>`;
+    };
+    if (showOK) s += curve(M.OK.at, bronze, 2.4, '');
+    if (showMM) s += curve(M.MM.at, ink, 2.4, '');
+    if (femX) {
+      s += `<polyline fill="none" stroke="${blue}" stroke-width="1.5" points="${femX.filter(q => Math.abs(q[0]) <= ym).map(q => A.X(q[0]).toFixed(1) + ',' + A.Y(q[1]).toFixed(1)).join(' ')}"/>`;
+      femX.filter(q => Math.abs(q[0]) <= ym).forEach(q => { s += `<circle cx="${A.X(q[0]).toFixed(1)}" cy="${A.Y(q[1]).toFixed(1)}" r="2.6" fill="${blue}"/>`; });
     }
-    const y0 = A.Y(0);
-    const area = arr => `M${arr[0][0]},${y0} ` + arr.map(q => `L${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(' ') + ` L${arr[arr.length - 1][0]},${y0} Z`;
-    s += `<path d="${area(pos)}" fill="${bronze}" opacity=".35"/><path d="${area(neg)}" fill="${blue}" opacity=".3"/>`;
-    s += `<line x1="${o.L}" x2="${o.W - o.R}" y1="${y0}" y2="${y0}" stroke="${ink}" opacity=".7"/>`;
-    s += `<polyline fill="none" stroke="${ink}" stroke-width="2.2" points="${all.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' ')}"/>`;
-    s += `<line x1="${o.L}" x2="${o.W - o.R}" y1="${A.Y(p.Re)}" y2="${A.Y(p.Re)}" stroke="${bronze}" stroke-dasharray="5 4"/><text x="${o.W - o.R - 4}" y="${A.Y(p.Re) - 5}" text-anchor="end">Re = ${fmt(p.Re, 0)} MPa</text>`;
-    for (const sg of [-1, 1]) s += `<line x1="${A.X(sg * st.b)}" x2="${A.X(sg * st.b)}" y1="${o.T}" y2="${o.H - o.B}" stroke="${ink}" stroke-dasharray="2 4"/>`;
-    s += `<text x="${A.X(st.b) + 4}" y="${o.T + 12}">b</text><text x="${A.X(0)}" y="${o.T + 12}" text-anchor="middle">talina</text>`;
-    s += `<text x="${A.X(-Math.sqrt(3) * st.b)}" y="${A.Y(-0.2 * p.Re)}" text-anchor="middle" style="fill:${ink}">tlak</text><text x="${A.X(Math.sqrt(3) * st.b)}" y="${A.Y(-0.2 * p.Re)}" text-anchor="middle" style="fill:${ink}">tlak</text><text x="${A.X(0)}" y="${A.Y(0.45 * p.Re)}" text-anchor="middle" style="fill:${ink};font-weight:600">vlak</text>`;
+    // legenda
+    let lx = o.W - o.R - 8, items = [];
+    if (showMM) items.push(['Masubuchi i Martin', ink]);
+    if (showOK) items.push(['Okerblom', bronze]);
+    if (femX) items.push(['CalculiX', blue]);
+    let lxx = o.L; items.forEach(it => { s += `<line x1="${lxx}" x2="${lxx + 22}" y1="14" y2="14" stroke="${it[1]}" stroke-width="3"/><text x="${lxx + 28}" y="18" style="fill:${ink}">${it[0]}</text>`; lxx += 40 + it[0].length * 7; });
     $('stress').innerHTML = s;
-    $('stressOut').innerHTML = `Vrh σₘ ≈ Re = <b>${fmt(p.Re, 0)} MPa</b>. Vlačna zona ±b = <b>±${fmt(st.b, 1)} mm</b>, talina ±${fmt(st.yF, 1)} mm (model). Najveće tlačno naprezanje ≈ <b>${fmt(-0.446 * p.Re, 0)} MPa</b> na ±${fmt(Math.sqrt(3) * st.b, 1)} mm od osi.`;
+
+    // tablica usporedbe
+    const rows = [];
+    const femStats = femX ? (() => {
+      const pk = Math.max(...femX.map(q => q[1])), mn = Math.min(...femX.map(q => q[1]));
+      const tens = femX.filter(q => q[1] > 0).map(q => Math.abs(q[0]));
+      return { peak: pk, comp: mn, b: tens.length ? Math.max(...tens) : NaN };
+    })() : null;
+    if (showMM) rows.push(['Masubuchi i Martin', M.MM.peak, M.MM.b, M.MM.comp, M.MM.F]);
+    if (showOK) rows.push(['Okerblom', M.OK.peak, M.OK.b, M.OK.comp, M.OK.F]);
+    if (femStats) rows.push(['CalculiX (učitano)', femStats.peak, femStats.b, femStats.comp, NaN]);
+    $('stressTable').innerHTML = rows.length ? `<tr><th>Model</th><th>Vrh σx, MPa</th><th>Poluširina vlačne zone b, mm</th><th>Najveći tlak, MPa</th><th>Sila skupljanja, kN</th></tr>` +
+      rows.map(r => `<tr><td>${r[0]}</td><td>${fmt(r[1], 0)}</td><td>${fmt(r[2], 1)}</td><td>${fmt(r[3], 0)}</td><td>${Number.isFinite(r[4]) ? fmt(r[4], 0) : '–'}</td></tr>`).join('') : '';
+    $('stressWarn').textContent = showOK && M.OK.warn.length ? 'Okerblom: ' + M.OK.warn.join('; ') + '.' : '';
+
+    // --- poprečno duž zavara ---
+    const TR = M.TR, femY = FEM.y && FEM.y.length ? FEM.y : null;
+    let t0 = -p.Re * 0.6, t1 = p.Re * 0.9;
+    if (femY) femY.forEach(q => { t0 = Math.min(t0, q[1] * 1.1); t1 = Math.max(t1, q[1] * 1.1); });
+    const o2 = { W: 760, H: 270, L: 56, R: 16, T: 16, B: 40, x0: 0, x1: p.L, y0: t0, y1: t1 };
+    o2.xt = ticks(0, p.L, 8); o2.yt = ticks(t0, t1, 6); o2.xl = 'položaj duž zavara x, mm'; o2.yl = 'σy, MPa';
+    const A2 = axes(o2); let s2 = A2.s;
+    s2 += `<line x1="${o2.L}" x2="${o2.W - o2.R}" y1="${A2.Y(0)}" y2="${A2.Y(0)}" stroke="${ink}" opacity=".6"/>`;
+    const c2 = (f, col, w, dash) => {
+      const pts = []; for (let i = 0; i <= 300; i++) { const x = p.L * i / 300; pts.push(A2.X(x).toFixed(1) + ',' + A2.Y(f(x)).toFixed(1)); }
+      return `<polyline fill="none" stroke="${col}" stroke-width="${w}" ${dash ? `stroke-dasharray="${dash}"` : ''} points="${pts.join(' ')}"/>`;
+    };
+    s2 += c2(TR.free, muted, 1.8, '6 4');
+    s2 += c2(TR.at, ink, 2.4, '');
+    if (femY) s2 += femY.filter(q => q[0] >= 0 && q[0] <= p.L).map(q => `<circle cx="${A2.X(q[0]).toFixed(1)}" cy="${A2.Y(q[1]).toFixed(1)}" r="2.6" fill="${blue}"/>`).join('');
+    const leg2 = [['slobodne ploče', muted, '6 4'], [`s ukliještenošću (${({ low: 'mala', mid: 'srednja', high: 'velika' })[p.restr]})`, ink, '']].concat(femY ? [['CalculiX', blue, '']] : []);
+    leg2.forEach((it, i) => { const yy = o2.T + 14 + 16 * i; s2 += `<line x1="${o2.W - o2.R - 230}" x2="${o2.W - o2.R - 208}" y1="${yy - 4}" y2="${yy - 4}" stroke="${it[1]}" stroke-width="3" ${it[2] ? `stroke-dasharray="${it[2]}"` : ''}/><text x="${o2.W - o2.R - 202}" y="${yy}" style="fill:${ink}">${it[0]}</text>`; });
+    $('stressT').innerHTML = s2;
+
+    $('stressOut').innerHTML = `Uzdužno: vrh ≈ Re = <b>${fmt(p.Re, 0)} MPa</b>; vlačna zona ±${fmt(M.MM.b, 1)} mm (Masubuchi i Martin) odnosno ±${fmt(M.OK.b, 1)} mm (Okerblom). ` +
+      `Poprečno u sredini zavara ≈ <b>${fmt(TR.at(p.L / 2), 0)} MPa</b>, na krajevima ≈ <b>${fmt(TR.at(0), 0)} MPa</b>.`;
   }
 
   /* ---------------- temperaturno polje (canvas) ---------------- */
@@ -485,7 +534,7 @@
     const e = W.evaluate(p);
     return {
       id: uid(), ts: new Date().toISOString(), oznaka: '', zavarivac: '', napomena: '', demo: false,
-      in: { mat: p.mat, Re: p.Re, d: p.d, joint: p.joint, restr: p.restr, proc: p.proc, HD: p.HD, I: p.I, U: p.U, v: p.v,
+      in: { mat: p.mat, Re: p.Re, d: p.d, B: p.B, L: p.L, talina: CERT ? CERT.heat || '' : '', CEVcert: CERT && Number.isFinite(CERT.cev) ? CERT.cev : '', joint: p.joint, restr: p.restr, proc: p.proc, HD: p.HD, I: p.I, U: p.U, v: p.v,
         TpWPS: p.TpWPS, T0: p.T0, Ta: p.Ta, RH: p.RH, tmin: p.tmin, tmax: p.tmax, Tmax: p.Tmax, ...p.comp },
       pred: { Q: e.Q, t85: e.t85, HV: e.HV, TpCET: e.TpCET, risk: e.risk },
       mj: { t85: '', HV: '', def: '', sig: '', greske: '' }, ...extra
@@ -532,7 +581,7 @@
     const i = r.in;
     if (W.MAT[i.mat]) $('mat').value = i.mat;
     const set = (id, v) => { if (v !== undefined && v !== null && v !== '') $(id).value = v; };
-    ['Re', 'd', 'joint', 'restr', 'proc', 'I', 'U', 'v', 'TpWPS', 'T0', 'Ta', 'RH', 'tmin', 'tmax', 'Tmax'].forEach(k => set(k, i[k]));
+    ['Re', 'd', 'B', 'L', 'joint', 'restr', 'proc', 'I', 'U', 'v', 'TpWPS', 'T0', 'Ta', 'RH', 'tmin', 'tmax', 'Tmax'].forEach(k => set(k, i[k]));
     set('HD', String(i.HD));
     CHEM.forEach(k => set('c' + k, i[k]));
     probeAuto = true; render();
@@ -588,7 +637,7 @@
   // CSV: razdjelnik ';', decimalni zarez, UTF-8 s BOM-om (otvara se izravno u hrvatskom Excelu)
   const CSVCOLS = [
     ['datum', r => r.ts], ['oznaka', r => r.oznaka], ['zavarivac', r => r.zavarivac], ['napomena', r => r.napomena], ['primjer', r => r.demo ? 'da' : 'ne'],
-    ['materijal', r => r.in.mat], ...CHEM.map(k => [k, r => r.in[k]]), ['Re_MPa', r => r.in.Re], ['debljina_mm', r => r.in.d],
+    ['materijal', r => r.in.mat], ['talina', r => r.in.talina], ['CEV_certifikat', r => r.in.CEVcert], ...CHEM.map(k => [k, r => r.in[k]]), ['Re_MPa', r => r.in.Re], ['debljina_mm', r => r.in.d], ['sirina_B_mm', r => r.in.B], ['duljina_L_mm', r => r.in.L],
     ['spoj', r => r.in.joint], ['uklijestenost', r => r.in.restr], ['postupak', r => r.in.proc], ['HD', r => r.in.HD],
     ['I_A', r => r.in.I], ['U_V', r => r.in.U], ['v_cm_min', r => r.in.v], ['Tp_WPS_C', r => r.in.TpWPS],
     ['T0_C', r => r.in.T0], ['Ta_C', r => r.in.Ta], ['RH_pct', r => r.in.RH], ['t85_min_s', r => r.in.tmin], ['t85_max_s', r => r.in.tmax], ['Tmax_C', r => r.in.Tmax],
@@ -635,7 +684,7 @@
       const get = (r, n) => ix(n) >= 0 ? r[ix(n)] : '';
       let n = 0;
       rows.forEach(r => {
-        const inp = { mat: get(r, 'materijal'), Re: num(get(r, 'Re_MPa')), d: num(get(r, 'debljina_mm')), joint: get(r, 'spoj') || 'butt',
+        const inp = { mat: get(r, 'materijal'), talina: get(r, 'talina'), CEVcert: num(get(r, 'CEV_certifikat')), Re: num(get(r, 'Re_MPa')), d: num(get(r, 'debljina_mm')), B: num(get(r, 'sirina_B_mm')), L: num(get(r, 'duljina_L_mm')), joint: get(r, 'spoj') || 'butt',
           restr: get(r, 'uklijestenost') || 'mid', proc: get(r, 'postupak') || 'MAG', HD: num(get(r, 'HD')), I: num(get(r, 'I_A')), U: num(get(r, 'U_V')),
           v: num(get(r, 'v_cm_min')), TpWPS: num(get(r, 'Tp_WPS_C')), T0: num(get(r, 'T0_C')), Ta: num(get(r, 'Ta_C')), RH: num(get(r, 'RH_pct')),
           tmin: num(get(r, 't85_min_s')), tmax: num(get(r, 't85_max_s')), Tmax: num(get(r, 'Tmax_C')) };
@@ -650,6 +699,156 @@
     } catch (e) { msg('Datoteku nije moguće pročitati kao CSV.'); }
     ev.target.value = '';
   });
+
+  /* ---------------- certifikat materijala ---------------- */
+  const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+  const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const TESS = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+  const loaded = {};
+  function loadScript(src) {
+    if (!loaded[src]) loaded[src] = new Promise((res, rej) => {
+      const s = document.createElement('script'); s.src = src; s.onload = res;
+      s.onerror = () => rej(new Error('Biblioteku nije moguće učitati (' + src.split('/')[2] + '). Provjeri internetsku vezu.'));
+      document.head.appendChild(s);
+    });
+    return loaded[src];
+  }
+  const cstat = t => { $('certStatus').textContent = t; };
+  let CERTP = null;   // rezultat čitanja prije potvrde
+
+  async function ocrCanvas(canvas, page, label) {
+    await loadScript(TESS);
+    const worker = await window.Tesseract.createWorker('eng', 1, {
+      logger: m => { if (m.status === 'recognizing text') cstat(`${label}: prepoznavanje teksta ${Math.round(m.progress * 100)} %`); }
+    });
+    try {
+      const { data } = await worker.recognize(canvas);
+      return (data.words || []).map(w => ({ t: w.text, x: w.bbox.x0, y: (w.bbox.y0 + w.bbox.y1) / 2, w: w.bbox.x1 - w.bbox.x0, h: w.bbox.y1 - w.bbox.y0, page }));
+    } finally { await worker.terminate(); }
+  }
+
+  async function readPdf(file) {
+    cstat('Učitavam čitač PDF-a…');
+    await loadScript(PDFJS);
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+    const doc = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    const tokens = []; let preview = null, ocr = false;
+    for (let pn = 1; pn <= Math.min(doc.numPages, 3); pn++) {
+      const page = await doc.getPage(pn);
+      const vp1 = page.getViewport({ scale: 1 });
+      const tc = await page.getTextContent();
+      const items = tc.items.filter(it => it.str && it.str.trim());
+      const vp = page.getViewport({ scale: 2 });
+      const cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+      await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+      if (pn === 1) preview = cv;
+      if (items.map(it => it.str).join('').length > 40) {
+        for (const it of items) {
+          const h = Math.hypot(it.transform[2], it.transform[3]) || it.height || 10;
+          tokens.push({ t: it.str, x: it.transform[4], y: vp1.height - it.transform[5] - h / 2, w: it.width, h, page: pn });
+        }
+      } else {
+        ocr = true;
+        tokens.push(...await ocrCanvas(cv, pn, `Stranica ${pn} je skenirana`));
+      }
+    }
+    return { tokens, preview, ocr };
+  }
+
+  async function readImage(file) {
+    const url = URL.createObjectURL(file);
+    const img = new Image(); img.src = url; await img.decode();
+    const scale = Math.min(1, 2400 / Math.max(img.naturalWidth, img.naturalHeight)) * (Math.max(img.naturalWidth, img.naturalHeight) < 1200 ? 2 : 1);
+    const cv = document.createElement('canvas'); cv.width = Math.round(img.naturalWidth * scale); cv.height = Math.round(img.naturalHeight * scale);
+    const c = cv.getContext('2d'); c.drawImage(img, 0, 0, cv.width, cv.height);
+    URL.revokeObjectURL(url);
+    const tokens = await ocrCanvas(cv, 1, 'Fotografija');
+    return { tokens, preview: cv, ocr: true };
+  }
+
+  const CERT_FIELDS = ['C', 'Si', 'Mn', 'Cr', 'Mo', 'Ni', 'Cu', 'V'];
+  function showCertRow() {
+    const r = CERTP.res.rows[+$('certRow').value || 0];
+    $('certChem').innerHTML = CERT_FIELDS.map(k => {
+      const v = r && r.values[k] !== undefined ? r.values[k] : '';
+      const fl = r && r.flags[k];
+      return `<label class="${fl || v === '' ? 'flag' : ''}" title="${esc(fl || (v === '' ? 'nije pronađeno' : ''))}">${k}<input type="number" step="0.001" min="0" data-el="${k}" value="${v}"></label>`;
+    }).join('') + `<label>ReH, MPa<input type="number" step="1" data-el="ReH" value="${CERTP.res.ReH ?? ''}"></label>` +
+      `<label>CEV<input type="number" step="0.01" data-el="CEV" value="${(r && r.values.CEV !== undefined ? r.values.CEV : CERTP.res.cev) ?? ''}"></label>`;
+    const notes = [];
+    if (r) Object.entries(r.flags).filter(([k]) => CERT_FIELDS.includes(k) || k === 'CEV').forEach(([k, f]) => notes.push(`${k}: ${f.replace(/\./g, ',')}`));
+    const miss = r ? CERT_FIELDS.filter(k => r.values[k] === undefined) : CERT_FIELDS;
+    if (miss.length) notes.push('nije pronađeno: ' + miss.join(', ') + ' (ostaje dosadašnja vrijednost ako polje ostane prazno)');
+    if (CERTP.ocr) notes.push('tekst je prepoznat OCR-om, provjeri svaku vrijednost prema slici');
+    $('certWarn').textContent = notes.length ? 'Provjeri: ' + notes.join('; ') + '.' : '';
+  }
+
+  $('certFile').addEventListener('change', async ev => {
+    const file = ev.target.files[0]; ev.target.value = '';
+    if (!file) return;
+    $('certPanel').hidden = true;
+    try {
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+      const out = isPdf ? await readPdf(file) : await readImage(file);
+      const res = window.Cert.parse(out.tokens);
+      CERTP = { res, ocr: out.ocr, name: file.name };
+      $('certPrev').innerHTML = ''; out.preview.setAttribute('aria-label', 'Pregled certifikata'); $('certPrev').appendChild(out.preview);
+      $('certMeta').innerHTML = [
+        res.grade ? `Oznaka: <b>${esc(res.grade)}</b>` : 'Oznaka čelika nije pronađena',
+        res.heat ? `talina <b>${esc(res.heat)}</b>` : null,
+        Number.isFinite(res.cev) ? `CEV <b>${fmt(res.cev, 2)}</b>` : 'CEV nije pronađen',
+        Number.isFinite(res.ReH) ? `ReH <b>${fmt(res.ReH, 0)} MPa</b>` : null
+      ].filter(Boolean).join(', ');
+      $('certRow').innerHTML = res.rows.map((r, i) => `<option value="${i}">${esc(r.label)}</option>`).join('') || '<option value="0">nije pronađeno</option>';
+      $('certRowWrap').hidden = res.rows.length < 2;
+      showCertRow();
+      $('certPanel').hidden = false;
+      cstat(res.rows.length ? `Pročitano iz "${file.name}". Provjeri vrijednosti uz pregled certifikata pa ih upiši u obrazac.`
+                            : `Iz "${file.name}" nije prepoznata tablica kemijskog sastava. Vrijednosti možeš upisati ručno ispod.`);
+    } catch (e) {
+      cstat('Certifikat nije moguće pročitati: ' + (e && e.message ? e.message : e));
+    }
+  });
+  $('certRow').addEventListener('change', showCertRow);
+  $('certCancel').addEventListener('click', () => { $('certPanel').hidden = true; cstat('Učitavanje certifikata je otkazano.'); });
+  $('certApply').addEventListener('click', () => {
+    const val = k => { const el = $('certChem').querySelector(`[data-el="${k}"]`); const v = el ? parseFloat(el.value) : NaN; return Number.isFinite(v) ? v : null; };
+    const preset = window.Cert.presetFor(CERTP.res.grade);
+    if (preset && $('mat').value !== preset) { $('mat').value = preset; applyMaterial(); }
+    CERT_FIELDS.forEach(k => { const v = val(k); if (v !== null) $('c' + k).value = v; });
+    const reh = val('ReH'); if (reh !== null) $('Re').value = reh;
+    CERT = { cev: val('CEV'), heat: CERTP.res.heat, grade: CERTP.res.grade, file: CERTP.name };
+    $('certPanel').hidden = true;
+    $('certInfo').innerHTML = `Podaci iz certifikata <b>${esc(CERT.file)}</b>${CERT.grade ? ', ' + esc(CERT.grade) : ''}${CERT.heat ? ', talina ' + esc(CERT.heat) : ''}.`;
+    cstat('Vrijednosti iz certifikata upisane su u obrazac.');
+    probeAuto = true; render();
+  });
+
+  /* ---------------- rezultati iz CalculiX-a ---------------- */
+  function parseTwoCols(text) {
+    const out = [];
+    text.replace(/^\ufeff/, '').split(/\r?\n/).forEach(line => {
+      if (!line.trim() || /^[#!*]/.test(line.trim())) return;
+      let parts = line.includes(';') ? line.split(';') : line.includes('\t') ? line.split('\t')
+        : (line.match(/,/g) || []).length === 1 && !/\d,\d+\s+\S/.test(line) ? line.split(',') : line.trim().split(/\s+/);
+      parts = parts.map(x => x.trim()).filter(Boolean);
+      if (parts.length < 2) return;
+      const a = parseFloat(parts[0].replace(',', '.')), b = parseFloat(parts[1].replace(',', '.'));
+      if (Number.isFinite(a) && Number.isFinite(b)) out.push([a, b]);
+    });
+    return out.sort((p, q) => p[0] - q[0]);
+  }
+  $('femFile').addEventListener('change', async ev => {
+    const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
+    const pts = parseTwoCols(await f.text());
+    const kind = $('femKind').value;
+    if (pts.length < 3) { $('femStatus').textContent = `U "${f.name}" nisu pronađena barem tri retka s dva broja.`; return; }
+    FEM[kind] = pts;
+    $('femStatus').textContent = `Učitano ${pts.length} točaka iz "${f.name}" (${kind === 'x' ? 'uzdužni profil σx' : 'σy duž zavara'}).`;
+    if (P) renderStress();
+  });
+  $('femClear').addEventListener('click', () => { FEM.x = null; FEM.y = null; $('femStatus').textContent = 'Učitani rezultati su uklonjeni.'; if (P) renderStress(); });
+  ['smMM', 'smOK'].forEach(id => $(id).addEventListener('change', () => { if (P) renderStress(); }));
 
   /* ---------------- događaji ---------------- */
   let pending = false;

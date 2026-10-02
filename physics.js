@@ -212,6 +212,47 @@
     return { b, yF, sm, dTcrit, at };
   }
 
+  /* ---------- modeli zaostalih naprezanja ---------- */
+  // p.B = ukupna širina ploče (mm), p.L = duljina zavara (mm)
+  const integrate = (f, a, b, n = 2000) => {
+    let s = 0; const h = (b - a) / n;
+    for (let i = 0; i <= n; i++) s += f(a + i * h) * (i === 0 || i === n ? 0.5 : 1);
+    return s * h;
+  };
+
+  function stressModels(p, T0) {
+    const s = sourceState(p, T0);
+    const dTy = p.Re / (E_MOD * ALPHA);
+    const half = p.B / 2;
+
+    // 1) Masubuchi i Martin (samouravnotežen, beskonačno široka ploča)
+    const mm = stressProfile(p, T0);
+    const mmTens = integrate(y => Math.max(mm.at(y), 0), -mm.b, mm.b);
+    const MM = { id: 'mm', name: 'Masubuchi i Martin', b: mm.b, peak: mm.sm, at: mm.at,
+      comp: -0.446 * mm.sm, F: mmTens * p.d / 1000, warn: [] };
+
+    // 2) Okerblom: pravokutna vlačna zona σ = Re, poluširina iz uvjeta ΔT_vrh = Re/(E·α) (2D),
+    //    jednoliki tlak po ostatku širine ploče B
+    let bO = 0.5 * Math.sqrt(2 / (Math.PI * Math.E)) * s.q / (RHOC * s.v * p.d * dTy);   // 0,242 (Okerblom: 2b = 0,484·q/(v·d·cρ·ΔT))
+    const warnO = [];
+    if (!s.is2D) warnO.push('model je izveden za tanke ploče (2D odvođenje topline)');
+    if (2 * bO >= 0.9 * p.B) { warnO.push('vlačna zona zauzima gotovo cijelu širinu ploče'); bO = 0.45 * p.B; }
+    const sc = -p.Re * 2 * bO / (p.B - 2 * bO);
+    const OK = { id: 'ok', name: 'Okerblom (pravokutna zona)', b: bO, peak: p.Re, comp: sc,
+      at: y => Math.abs(y) <= bO ? p.Re : (Math.abs(y) <= half ? sc : NaN),
+      F: p.Re * 2 * bO * p.d / 1000, warn: warnO };
+
+    // 3) Poprečna naprezanja duž zavara (x od 0 do L): slobodne ploče daju vlak u sredini
+    //    i tlak na krajevima (neto sila nula); ukliještenost dodaje jednoliko reaktivno naprezanje.
+    const sA = 0.2 * p.Re;
+    const sR = ({ low: 0, mid: 0.25, high: 0.5 })[p.restr] * p.Re;
+    const tFree = x => { const xi = 2 * x / p.L - 1; return sA * (1 - 3 * xi * xi); };
+    const TR = { sA, sR, L: p.L, free: tFree,
+      at: x => clamp(tFree(x) + sR, -p.Re, p.Re) };
+
+    return { MM, OK, TR, dTy };
+  }
+
   /* ---------- procjena rizika ---------- */
 
   const RESTR = { low: .1, mid: .35, high: .7 };
@@ -293,7 +334,7 @@
 
   const api = { K, ULINE, HD_DEFAULT, MAT, HV_LIMIT, LAMBDA, RHOC, DIFF, T_MELT,
     heatInput, coupledVoltage, t85EN, carbonEq, preheatCET, hvMax, dewPoint,
-    besselK0, rosenthal, sourceState, thermalCycle, peakTemp, distanceForPeak, peakRise, distanceForRise, stressProfile,
+    besselK0, rosenthal, sourceState, thermalCycle, peakTemp, distanceForPeak, peakRise, stressModels, integrate, distanceForRise, stressProfile,
     evaluate, recommend, processWindow, variant, clamp };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
