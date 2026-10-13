@@ -303,6 +303,7 @@
       if (!/^\d{1,2}\.\d{1,5}$/.test(s)) return null;
     } else {
       if (!/^\d{1,5}$/.test(s)) return null;
+      if (s === '0') return null;                       // sama nula je gotovo uvijek nepročitana vrijednost
       if (s.length >= 2 && s[0] === '0') s = '0.' + s.slice(1);
     }
     return { s, lt };
@@ -328,10 +329,15 @@
     let best = null; c.forEach((v, k) => { if (!best || v > best.v) best = { k, v }; });
     return best ? best.k : null;
   }
+  // oznaka retka s granicama, uz tipične OCR iskrivljenosti ("Nax", "Mex", "Mio", "rnax")
+  function isSpecLabel(t) {
+    const x = String(t || '');
+    return SPEC_ROW.test(x) || /(^|[^A-Za-z])(m|n|rn|h)[aeio1l][xnk](\.|[^A-Za-z0-9]|$)/i.test(x);
+  }
   const SPEC_ROW = /\b(min|max|spec|specified|required|zahtjev|zahtijevano|norma|soll|limit|grenz)/i;
 
   const api = { parse, presetFor, parseNum, splitTokens, groupLines, RANGE,
-    symFromCell, normCellNum, voteNumbers, voteSymbols, fitRange, SPEC_ROW };
+    symFromCell, normCellNum, voteNumbers, voteSymbols, fitRange, SPEC_ROW, isSpecLabel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Cert = api;
 })(typeof window !== 'undefined' ? window : globalThis);
