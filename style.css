@@ -11,12 +11,12 @@
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
     --bg:#12181E; --panel:#1B232B; --ink:#E3E8EC; --muted:#97A4AE; --line:#34414C; --plate:#3E4952;
-    --blue:#6E9BD6; --ok:#6DB388; --warn:#D39456; --bad:#E07A7A;
+    --blue:#6E9BD6; --ok:#6DB388; --warn:#D39456; --bad:#E07A7A; color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
   --bg:#12181E; --panel:#1B232B; --ink:#E3E8EC; --muted:#97A4AE; --line:#34414C; --plate:#3E4952;
-  --blue:#6E9BD6; --ok:#6DB388; --warn:#D39456; --bad:#E07A7A;
+  --blue:#6E9BD6; --ok:#6DB388; --warn:#D39456; --bad:#E07A7A; color-scheme:dark;
 }
 *,*::before,*::after{box-sizing:inherit}
 html{scroll-padding-top:calc(env(safe-area-inset-top,0px) + 56px)}
@@ -31,7 +31,7 @@ header.top p{margin:8px 0 0;color:var(--muted);max-width:62ch}
 .stamp{font-family:var(--cond);font-weight:600;border:2px solid var(--bronze);color:var(--bronze);padding:4px 10px;transform:rotate(-3deg);white-space:nowrap}
 @media (max-width:640px){header.top{grid-template-columns:1fr}.head-actions{align-items:flex-start}}
 
-nav.jump{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);margin:0 -20px;padding:8px 20px;padding-top:calc(8px + env(safe-area-inset-top,0px));display:flex;gap:6px 18px;flex-wrap:wrap;font-family:var(--cond);font-weight:600;font-size:1.05rem}
+nav.jump{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line);margin:0 -20px;padding:8px 20px;display:flex;gap:6px 18px;flex-wrap:wrap;font-family:var(--cond);font-weight:600;font-size:1.05rem}
 nav.jump a{color:var(--muted);text-decoration:none}
 nav.jump a:hover,nav.jump a:focus-visible{color:var(--ink);text-decoration:underline}
 
@@ -187,3 +187,4 @@ label.filebtn:focus-within{outline:3px solid var(--blue);outline-offset:1px}
 .certprev canvas{cursor:crosshair;touch-action:none}
 .selbox{position:absolute;border:2px solid var(--bronze);background:rgba(214,174,85,.18);pointer-events:none}
 button:disabled{opacity:.45;cursor:not-allowed}
+.srcbadge{display:inline-block;font-size:.8rem;font-weight:600;padding:1px 8px;border:1px solid var(--blue);color:var(--blue);border-radius:2px;vertical-align:2px}

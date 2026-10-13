@@ -616,9 +616,17 @@
     msg(`Zavar ${r.oznaka || 'bez oznake'} je spremljen. Izmjerene rezultate upiši u tablicu.`);
     $('lgId').value = '';
   });
+  let clearArmed = 0;
   $('lgClear').addEventListener('click', () => {
     if (!LOG.length) { msg('Dnevnik je već prazan.'); return; }
-    if (confirm('Obrisati sve zapise iz dnevnika? Prije toga možeš izvesti CSV.')) { LOG = []; saveLog(); renderLog(); msg('Dnevnik je obrisan.'); }
+    if (Date.now() - clearArmed > 5000) {           // potvrda drugim klikom (dijalozi su u artefaktu blokirani)
+      clearArmed = Date.now(); $('lgClear').textContent = 'Klikni ponovno za brisanje';
+      msg('Brisanje briše sve zapise. Prije toga možeš izvesti CSV.');
+      setTimeout(() => { if (Date.now() - clearArmed >= 5000) $('lgClear').textContent = 'Obriši sve'; }, 5100);
+      return;
+    }
+    clearArmed = 0; $('lgClear').textContent = 'Obriši sve';
+    LOG = []; saveLog(); renderLog(); msg('Dnevnik je obrisan.');
   });
   $('lgDemo').addEventListener('click', () => {
     if (!P) { msg('Ispravi ulazne podatke prije dodavanja primjera.'); return; }
@@ -653,10 +661,18 @@
     if (!LOG.length) { msg('Dnevnik je prazan, nema se što izvesti.'); return; }
     const lines = [CSVCOLS.map(c => c[0]).join(';'), ...LOG.map(r => CSVCOLS.map(c => cell(c[1](r))).join(';'))];
     const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = 'dnevnik-zavara-' + new Date().toISOString().slice(0, 10) + '.csv';
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    msg(`Izvezeno ${LOG.length} zapisa.`);
+    const filename = 'dnevnik-zavara-' + new Date().toISOString().slice(0, 10) + '.csv';
+    (async () => {
+      const dl = (window.claude && typeof window.claude.use === 'function') ? await window.claude.use('downloads').catch(() => null) : null;
+      if (dl) {
+        try { await dl.save({ filename, data: blob }); msg(`Izvezeno ${LOG.length} zapisa.`); }
+        catch (e) { msg(e && e.code === 'unavailable' ? 'Spremanje datoteke ovdje nije dostupno.' : 'Izvoz nije spremljen.'); }
+        return;
+      }
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      msg(`Izvezeno ${LOG.length} zapisa.`);
+    })();
   });
 
   function parseCSV(text) {
@@ -810,7 +826,7 @@
    * 1) na binarnoj slici traže se crte tablice i iz njih ćelije,
    * 2) zaglavlje se čita s dopuštenim slovima simbola, vrijednosti samo sa znamenkama,
    * 3) svaka ćelija čita se u nekoliko varijanti (povećanje, sivo ili crno-bijelo), a rezultat se bira glasanjem. */
-  const WL_NUM = '0123456789.,<', WL_SYM = 'ABCEFIMNOPSTVWZabeilnoqrstuv%()';
+  const WL_NUM = '0123456789.,<-', WL_SYM = 'ABCEFIMNOPSTVWZabeilnoqrstuv%()';
 
   function grayOf(canvas) {
     const c = canvas.getContext('2d', { willReadFrequently: true });
@@ -934,17 +950,25 @@
         await setMode('');
         const labCells = row.cells.filter(c => !c.empty && c.x + c.w <= firstX + 2);
         let lab = '';
-        for (const c of labCells) { tick(); lab += ' ' + await ocr(cellImage(src, c, scFor(c), true)); }
+        for (const c of labCells) {
+          // oznaka retka čita se u dvije varijante; uzima se ona s više slova i znamenki
+          const a = []; for (const bin of [true, false]) { tick(); a.push(await ocr(cellImage(src, c, scFor(c), bin))); }
+          a.sort((x, y) => (y.match(/[A-Za-z0-9]/g) || []).length - (x.match(/[A-Za-z0-9]/g) || []).length);
+          lab += ' ' + a[0];
+          if (a.some(t => window.Cert.isSpecLabel(t))) lab += ' Max';
+        }
         lab = lab.replace(/[|\[\]_]/g, ' ').replace(/\s+/g, ' ').trim();
-        if (window.Cert.SPEC_ROW.test(lab)) continue;
+        if (window.Cert.isSpecLabel(lab)) continue;
+        const labOk = /[A-Za-z0-9]{2,}/.test(lab);
         await setMode(WL_NUM);
         const values = {}, flags = {};
-        let found = 0;
+        let found = 0, dashes = 0;
         for (const col of header) {
           const c = row.cells.find(q => q.x <= col.cell.cx && q.x + q.w >= col.cell.cx);
           if (!c || c.empty) continue;
           const reads = [];
           for (const [sc, bin] of variants(c)) { tick(); reads.push(await ocr(cellImage(src, c, sc, bin))); }
+          if (reads.filter(t => /^[-–—]+$/.test(t.replace(/\s/g, ''))).length >= 2) { dashes++; continue; }
           const v = window.Cert.voteNumbers(reads);
           if (!v) continue;
           const fit = window.Cert.fitRange(col.sym, v.value, 1);
@@ -955,9 +979,13 @@
         }
         if (found < 2) { if (out.length) break; else continue; }
         if (values.C === undefined) continue;
-        out.push({ label: lab || ('redak ' + (out.length + 1)), values, flags, page: 1 });
+        // granice iz norme: crtice umjesto vrijednosti i bez čitljive oznake retka
+        if (dashes && !labOk) continue;
+        out.push({ label: lab || ('redak ' + (out.length + 1)), values, flags, page: 1, labOk });
       }
-      return { rows: out };
+      // ako barem jedan redak ima čitljivu oznaku (npr. M14x70), retci bez oznake su granice ili zaglavlja
+      const named = out.filter(r => r.labOk);
+      return { rows: (named.length ? named : out).map(({ labOk, ...r }) => r) };
     } finally { await worker.terminate(); }
   }
 
@@ -1006,12 +1034,12 @@
     return changed;
   }
 
-  async function readPdf(file) {
+  async function readPdf(file, opts = {}) {
     cstat('Učitavam čitač PDF-a…');
     await loadScript(PDFJS);
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
     const doc = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
-    const tokens = [], pages = {}; let preview = null, ocr = false;
+    const tokens = [], pages = {}, canvases = {}, scanned = []; let preview = null, ocr = false;
     for (let pn = 1; pn <= Math.min(doc.numPages, 3); pn++) {
       const page = await doc.getPage(pn);
       const vp1 = page.getViewport({ scale: 1 });
@@ -1021,29 +1049,126 @@
       const cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
       await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
       if (pn === 1) preview = cv;
+      canvases[pn] = cv;
       if (items.map(it => it.str).join('').length > 40) {
         for (const it of items) {
           const h = Math.hypot(it.transform[2], it.transform[3]) || it.height || 10;
           tokens.push({ t: it.str, x: it.transform[4], y: vp1.height - it.transform[5] - h / 2, w: it.width, h, page: pn });
         }
+      } else if (opts.ocr === false) {
+        scanned.push(pn);                      // OCR se radi tek ako zatreba
       } else {
         ocr = true;
         const t = await ocrCanvas(cv, pn, `Stranica ${pn} je skenirana`);
         tokens.push(...t); pages[pn] = t.prepped;
       }
     }
-    return { tokens, preview, ocr, pages };
+    return { tokens, preview, ocr, pages, canvases, scanned };
   }
 
-  async function readImage(file) {
+  async function readImage(file, opts = {}) {
     const url = URL.createObjectURL(file);
     const img = new Image(); img.src = url; await img.decode();
     const scale = Math.min(1, 4000 / Math.max(img.naturalWidth, img.naturalHeight));
     const cv = document.createElement('canvas'); cv.width = Math.round(img.naturalWidth * scale); cv.height = Math.round(img.naturalHeight * scale);
     const c = cv.getContext('2d'); c.drawImage(img, 0, 0, cv.width, cv.height);
     URL.revokeObjectURL(url);
+    if (opts.ocr === false) return { tokens: [], preview: cv, ocr: false, pages: {}, canvases: { 1: cv }, scanned: [1] };
     const tokens = await ocrCanvas(cv, 1, 'Fotografija');
-    return { tokens, preview: cv, ocr: true, pages: { 1: tokens.prepped } };
+    return { tokens, preview: cv, ocr: true, pages: { 1: tokens.prepped }, canvases: { 1: cv }, scanned: [] };
+  }
+
+  /* ---- čitanje certifikata Claudeom ----
+   * Kad je stranica otvorena kao Claude artefakt, slika certifikata šalje se Claudeu, koji vraća
+   * podatke kao JSON (na računu osobe koja gleda stranicu). Inače, ili ako Claude nije dostupan,
+   * koristi se OCR u pregledniku. */
+  const SAMPLE = { fn: null, types: [], maxBytes: 0, ok: false };
+  const sampleReady = (async () => {
+    try {
+      if (!window.claude || typeof window.claude.use !== 'function') return false;
+      const fn = await window.claude.use('sample');
+      if (!fn) return false;
+      const lim = await fn.limits().catch(() => null);
+      if (!lim || !lim.images) return false;
+      Object.assign(SAMPLE, { fn, types: lim.images.mediaTypes || [], maxBytes: lim.images.maxInputBytes || 0, ok: true });
+      if (!$('certPanel').hidden) return true;
+      cstat('PDF ili fotografija certifikata prema EN 10204 (3.1). Certifikat čita Claude na tvom Claude računu; slika se šalje samo za to čitanje.');
+      return true;
+    } catch (e) { return false; }
+  })();
+
+  const CLAUDE_ELEMS = ['C', 'Si', 'Mn', 'P', 'S', 'Cr', 'Mo', 'Ni', 'Cu', 'V', 'Nb', 'Ti', 'Al', 'B', 'N'];
+  const CLAUDE_PROMPT = (part) => `Na slici je ${part} certifikata o ispitivanju materijala (npr. prema EN 10204, tip 3.1). Pročitaj podatke i vrati SAMO jedan JSON objekt, bez ikakvog drugog teksta, ovog oblika:
+{"grade": "S355J2+N" ili null, "heat": "broj taline" ili null, "cev": broj ili null, "reh": broj ili null,
+ "rows": [{"label": "oznaka retka", ${CLAUDE_ELEMS.map(k => `"${k}": broj ili null`).join(', ')}}],
+ "unsure": ["simboli elemenata čije su znamenke slabo čitljive"]}
+Pravila:
+- "rows" su retci STVARNE kemijske analize (npr. talina/ladle, proizvod/product ili oznaka uzorka ili proizvoda). Retke s granicama iz norme ili narudžbe (Min, Max, Specified, Required, Soll) NE uključuj.
+- Vrijednosti su maseni udjeli u postocima, kao decimalni brojevi s točkom (0,226 piše se 0.226). Ako tablica navodi faktor (npr. ×100 ili ×1000), preračunaj u postotke.
+- Element koji nije naveden ili ima crticu umjesto vrijednosti je null. Ne nagađaj i ne računaj vrijednosti koje ne pišu.
+- "cev": ekvivalent ugljika (CEV, CE, Ceq) samo ako je naveden; inače null.
+- "reh": granica tečenja ReH ili Rp0,2 u MPa ako je navedena (prvi uzorak); inače null.
+- "heat": broj taline (Heat No., Cast No., Schmelze, Talina); "grade": oznaka čelika ili kvalitete; inače null.
+- U "unsure" navedi samo elemente čije vrijednosti nisu jasno čitljive na slici.`;
+
+  const canvasBlob = cv => new Promise((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('slika')), 'image/png'));
+  const numOrNull = x => (x === null || x === undefined || x === '' || !Number.isFinite(Number(x))) ? null : Number(x);
+
+  function fromClaude(j) {
+    if (!j || typeof j !== 'object') throw { code: 'invalid_json' };
+    const unsure = new Set((Array.isArray(j.unsure) ? j.unsure : []).map(String));
+    const rows = (Array.isArray(j.rows) ? j.rows : []).map((r, i) => {
+      const values = {}, flags = {};
+      CLAUDE_ELEMS.forEach(k => {
+        const v = numOrNull(r && r[k]); if (v === null || v < 0) return;
+        values[k] = v;
+        const R = window.Cert.RANGE[k];
+        if (R && v > R[1]) flags[k] = 'izvan uobičajenog raspona';
+        if (unsure.has(k)) flags[k] = 'Claude: slabo čitljivo na slici';
+      });
+      return { label: String((r && r.label) || ('redak ' + (i + 1))).slice(0, 60), values, flags, page: 1 };
+    }).filter(r => r.values.C !== undefined && Object.keys(r.values).length >= 2);
+    let cev = numOrNull(j.cev); if (cev !== null && (cev < 0.15 || cev > 0.95)) cev = null;
+    let reh = numOrNull(j.reh); if (reh !== null && (reh < 100 || reh > 1500)) reh = null;
+    const str = v => (typeof v === 'string' && v.trim()) ? v.trim().slice(0, 40) : null;
+    return { rows, cev, ReH: reh, grade: str(j.grade), heat: str(j.heat), warnings: [], blocks: [] };
+  }
+
+  const CLAUDE_OFF = ['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed', 'images_unavailable'];
+  const claudeMsg = code => ({
+    not_granted: 'Čitanje Claudeom nije odobreno, pa se koristi OCR u pregledniku.',
+    rate_limited: 'Claude je trenutno ograničen (previše zahtjeva ili dosegnut limit računa), pa se koristi OCR. Pokušaj kasnije.',
+    session_expired: 'Prijava na Claude je istekla; prijavi se ponovno. Zasad se koristi OCR.',
+    image_rejected: 'Claude nije prihvatio sliku, pa se koristi OCR.',
+    refused: 'Claude nije pročitao ovu sliku, pa se koristi OCR.',
+    invalid_json: 'Claudeov odgovor nije bilo moguće obraditi, pa se koristi OCR.'
+  })[code] || 'Claude trenutno nije dostupan, pa se koristi OCR.';
+
+  async function readWithClaude(blob, part, label) {
+    const t0 = Date.now();
+    const timer = setInterval(() => cstat(`${label}: Claude čita certifikat… ${Math.round((Date.now() - t0) / 1000)} s (obično 10–60 s)`), 1000);
+    try {
+      const j = await SAMPLE.fn.json(CLAUDE_PROMPT(part), { images: [blob] });
+      return fromClaude(j);
+    } catch (e) {
+      const code = e && e.code ? e.code : 'upstream_error';
+      if (CLAUDE_OFF.includes(code)) SAMPLE.ok = false;
+      throw { code, msg: claudeMsg(code) };
+    } finally { clearInterval(timer); }
+  }
+
+  async function blobFor(file, canvas) {
+    if (file && SAMPLE.types.includes(file.type) && (!SAMPLE.maxBytes || file.size <= SAMPLE.maxBytes)) return file;
+    return canvasBlob(canvas);
+  }
+
+  // OCR naknadno, za stranice koje su preskočene dok se čekao Claude
+  async function ensureOcr(out) {
+    for (const pn of out.scanned || []) {
+      const t = await ocrCanvas(out.canvases[pn], pn, pn === 1 && !out.isPdf ? 'Fotografija' : `Stranica ${pn} je skenirana`);
+      out.tokens.push(...t); out.pages[pn] = t.prepped; out.ocr = true;
+    }
+    out.scanned = [];
   }
 
   const CERT_FIELDS = ['C', 'Si', 'Mn', 'Cr', 'Mo', 'Ni', 'Cu', 'V'];
@@ -1059,7 +1184,8 @@
     if (r) Object.entries(r.flags).filter(([k]) => CERT_FIELDS.includes(k) || k === 'CEV').forEach(([k, f]) => notes.push(`${k}: ${f.replace(/\./g, ',')}`));
     const miss = r ? CERT_FIELDS.filter(k => r.values[k] === undefined) : CERT_FIELDS;
     if (miss.length) notes.push('nije pronađeno: ' + miss.join(', ') + ' (ostaje dosadašnja vrijednost ako polje ostane prazno)');
-    if (CERTP.ocr) notes.push('tekst je prepoznat OCR-om, provjeri svaku vrijednost prema slici');
+    if (CERTP.source === 'claude') notes.push('vrijednosti je pročitao Claude; usporedi ih sa slikom prije upisa');
+    else if (CERTP.ocr) notes.push('tekst je prepoznat OCR-om, provjeri svaku vrijednost prema slici');
     $('certWarn').textContent = notes.length ? 'Provjeri: ' + notes.join('; ') + '.' : '';
   }
 
@@ -1069,8 +1195,23 @@
     $('certPanel').hidden = true;
     try {
       const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
-      const out = isPdf ? await readPdf(file) : await readImage(file);
-      const res = window.Cert.parse(out.tokens);
+      await Promise.race([sampleReady, new Promise(r => setTimeout(r, 1500))]);
+      const viaClaude = SAMPLE.ok;
+      const out = isPdf ? await readPdf(file, { ocr: !viaClaude }) : await readImage(file, { ocr: !viaClaude });
+      out.isPdf = isPdf;
+      let res = null, source = 'tekst', note = '';
+      if (out.tokens.length && !out.scanned.length) {
+        res = window.Cert.parse(out.tokens);            // PDF s tekstom: brzo i točno, bez slanja
+      }
+      if (SAMPLE.ok && (!res || !res.rows.length)) {
+        try {
+          res = await readWithClaude(isPdf ? await canvasBlob(out.preview) : await blobFor(file, out.preview), 'stranica', 'Certifikat');
+          source = 'claude';
+          if (!res.rows.length) { note = 'Claude na slici nije pronašao tablicu kemijskog sastava. '; res = null; }
+        } catch (e) { note = (e && e.msg) || claudeMsg('upstream_error'); note += ' '; res = null; }
+      }
+      if (!res) { source = 'ocr'; await ensureOcr(out); res = window.Cert.parse(out.tokens); }
+      if (source !== 'claude') {
       // Kod OCR-a: ako tablica nije pročitana ili joj nedostaju glavni elementi, čita se po ćelijama
       const weak = r => !r.rows.length || ['C', 'Si', 'Mn'].some(k => r.rows[0].values[k] === undefined);
       if (out.ocr && res.rows.length) {
@@ -1085,12 +1226,13 @@
           if (byCells.rows.length && cnt(byCells.rows) >= cnt(res.rows)) res.rows = byCells.rows;
         } catch (e) { /* ostaje rezultat čitanja teksta */ }
       }
-      CERTP = { res, ocr: out.ocr, name: file.name, canvas: out.preview, sel: null };
+      }
+      CERTP = { res, ocr: out.ocr, source, name: file.name, file, canvas: out.preview, sel: null };
       $('certPrev').innerHTML = '<div class="selbox" id="certSel" hidden></div>';
       out.preview.setAttribute('aria-label', 'Pregled certifikata; mišem se može označiti tablica kemijskog sastava');
       $('certPrev').prepend(out.preview); bindSelection(out.preview);
       $('certCrop').disabled = true;
-      $('certMeta').innerHTML = [
+      $('certMeta').innerHTML = (source === 'claude' ? '<span class="srcbadge">Pročitao Claude</span> ' : '') + [
         res.grade ? `Oznaka: <b>${esc(res.grade)}</b>` : 'Oznaka čelika nije pronađena',
         res.heat ? `talina <b>${esc(res.heat)}</b>` : null,
         Number.isFinite(res.cev) ? `CEV <b>${fmt(res.cev, 2)}</b>` : 'CEV nije pronađen',
@@ -1100,8 +1242,8 @@
       $('certRowWrap').hidden = res.rows.length < 2;
       showCertRow();
       $('certPanel').hidden = false;
-      cstat(res.rows.length ? `Pročitano iz "${file.name}". Provjeri vrijednosti uz pregled certifikata pa ih upiši u obrazac.`
-                            : `Iz "${file.name}" nije prepoznata tablica kemijskog sastava. Vrijednosti možeš upisati ručno ispod.`);
+      cstat(note + (res.rows.length ? `Pročitano iz "${file.name}". Provjeri vrijednosti uz pregled certifikata pa ih upiši u obrazac.`
+                                    : `Iz "${file.name}" nije prepoznata tablica kemijskog sastava. Vrijednosti možeš upisati ručno ispod.`));
     } catch (e) {
       cstat('Certifikat nije moguće pročitati: ' + (e && e.message ? e.message : e));
     }
@@ -1135,18 +1277,24 @@
     crop.getContext('2d').drawImage(CERTP.canvas, s.x, s.y, s.w, s.h, 0, 0, crop.width, crop.height);
     $('certCrop').disabled = true;
     try {
-      let r2 = await readTableCells(crop, 'Označeno područje');
+      let r2 = { rows: [] }, src = 'ocr', note = '';
+      if (SAMPLE.ok) {
+        try { r2 = await readWithClaude(await canvasBlob(crop), 'isječak s tablicom kemijskog sastava', 'Označeno područje'); src = 'claude'; }
+        catch (e) { note = (e && e.msg) || ''; r2 = { rows: [] }; }
+      }
+      if (!r2.rows.length) { src = 'ocr'; r2 = await readTableCells(crop, 'Označeno područje'); }
       if (!r2.rows.length) {
         const toks = await ocrCanvas(crop, 1, 'Označeno područje', { psm: 6, targetW: 3200, maxScale: 10, hLine: 0.15, vLine: 0.45 });
         r2 = window.Cert.parse(toks);
       }
       if (r2.rows.length) {
-        CERTP.res.rows = r2.rows; CERTP.ocr = true;
+        CERTP.res.rows = r2.rows; CERTP.ocr = src === 'ocr'; CERTP.source = src;
+        if (src === 'claude') { ['grade', 'heat', 'ReH'].forEach(k => { if (r2[k] != null && CERTP.res[k] == null) CERTP.res[k] = r2[k]; }); }
         if (Number.isFinite(r2.cev)) CERTP.res.cev = r2.cev;
         $('certRow').innerHTML = r2.rows.map((r, i) => `<option value="${i}">${esc(r.label)}</option>`).join('');
         $('certRowWrap').hidden = r2.rows.length < 2;
         showCertRow();
-        cstat(`Iz označenog područja pročitano je ${r2.rows.length} ${r2.rows.length === 1 ? 'redak' : 'retka'} analize. Provjeri vrijednosti prema slici.`);
+        cstat(note + (note ? ' ' : '') + `Iz označenog područja pročitano je ${r2.rows.length} ${r2.rows.length === 1 ? 'redak' : 'retka'} analize. Provjeri vrijednosti prema slici.`);
       } else cstat('Ni u označenom području nije prepoznata tablica. Pokušaj označiti tablicu zajedno sa zaglavljem (C, Si, Mn…) ili upiši vrijednosti ručno.');
     } catch (e) { cstat('Čitanje označenog područja nije uspjelo: ' + (e && e.message ? e.message : e)); }
     $('certCrop').disabled = false;
@@ -1230,6 +1378,19 @@
     e.currentTarget.textContent = open ? 'Sakrij sve napomene' : 'Prikaži sve napomene';
   });
   $('printBtn').addEventListener('click', () => window.print());
+  // Unutar Claude artefakta ispis i obične veze za preuzimanje ne rade; primjer certifikata sprema se kroz Claude
+  if (window.claude && typeof window.claude.use === 'function') {
+    $('printBtn').hidden = true;
+    $('sampleCert').addEventListener('click', async ev => {
+      ev.preventDefault();
+      const dl = await window.claude.use('downloads').catch(() => null);
+      if (!dl) { cstat('Preuzimanje ovdje nije dostupno. Primjer certifikata nalazi se i na GitHub stranici projekta.'); return; }
+      try {
+        const blob = await (await fetch('primjer-certifikata.pdf')).blob();
+        await dl.save({ filename: 'primjer-certifikata.pdf', data: blob });
+      } catch (e) { if (e && e.code !== 'declined') cstat('Primjer certifikata nije spremljen.'); }
+    });
+  }
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { fieldStateDirty = true; if (P) render(); });
 
   /* ---------------- pokretanje ---------------- */

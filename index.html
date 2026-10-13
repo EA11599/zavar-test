@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Provjera parametara zavarivanja – demo</title>
+<title>Provjera parametara zavarivanja</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
@@ -66,9 +66,9 @@
       <div class="cert noprint">
         <div class="row">
           <label class="filebtn">Učitaj certifikat materijala<input type="file" id="certFile" accept=".pdf,application/pdf,image/*" class="sr"></label>
-          <a href="primjer-certifikata.pdf" download class="hint" style="margin:0">Preuzmi primjer certifikata</a>
+          <a href="primjer-certifikata.pdf" download id="sampleCert" class="hint" style="margin:0">Preuzmi primjer certifikata</a>
         </div>
-        <p class="hint" id="certStatus" role="status">PDF ili fotografija certifikata prema EN 10204 (3.1). Obrada se radi u pregledniku; datoteka se nikamo ne šalje.</p>
+        <p class="hint" id="certStatus" role="status">PDF ili fotografija certifikata prema EN 10204 (3.1). Obrada se radi u pregledniku.</p>
         <div id="certPanel" class="certpanel" hidden>
           <div class="certprev" id="certPrev"></div>
           <div class="certdata">
@@ -127,7 +127,7 @@
         <p>Odabirom materijala upisuju se tipične vrijednosti. U stvarnoj primjeni sastav i Re preuzimaju se iz certifikata materijala (EN 10204 3.1). Iz sastava se računaju dva ekvivalenta ugljika:</p>
         <div class="f">CE = C + Mn/6 + (Cr + Mo + V)/5 + (Ni + Cu)/15 &nbsp;&nbsp;(IIW)</div>
         <div class="f">CET = C + (Mn + Mo)/10 + (Cr + Cu)/20 + Ni/40 &nbsp;&nbsp;(EN 1011-2)</div>
-        <p><b>Učitavanje certifikata:</b> iz PDF-a s tekstom čita se tekst s položajima, a skenirani PDF ili fotografija prolaze prepoznavanje teksta (OCR). Program traži redak sa simbolima elemenata (C, Si, Mn…), vrijednosti ispod njih pridružuje stupcima po položaju, prepoznaje zapise ×100 i ×1000 te izdvaja CEV, oznaku čelika, broj taline i ReH. Pročitane vrijednosti uvijek treba provjeriti prije upisa, osobito kod OCR-a.</p>
+        <p><b>Učitavanje certifikata:</b> iz PDF-a s tekstom čita se tekst s položajima. Skenirani PDF ili fotografiju, kad je stranica otvorena kao Claude artefakt, čita Claude na računu osobe koja gleda stranicu (slika se šalje samo za to čitanje); inače ih čita prepoznavanje teksta (OCR) u pregledniku. Program traži redak sa simbolima elemenata (C, Si, Mn…), vrijednosti ispod njih pridružuje stupcima po položaju, prepoznaje zapise ×100 i ×1000 te izdvaja CEV, oznaku čelika, broj taline i ReH. Pročitane vrijednosti uvijek treba provjeriti prije upisa, osobito kod OCR-a.</p>
         <p>Ciljani raspon t8/5 i najveća temperatura komada (npr. 200 °C za poboljšane čelike) orijentacijske su vrijednosti; u radu ih treba povezati s preporukama proizvođača čelika.</p>
       </details>
     </fieldset>
