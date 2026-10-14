@@ -36,7 +36,9 @@
       T0: g('T0'), Ta: g('Ta'), RH: g('RH'), Re: g('Re'), d: g('d'), joint: $('joint').value,
       restr: $('restr').value, proc: $('proc').value, B: g('B'), L: g('L'), HD: g('HD'), I: g('I'), U: g('U'), v: g('v'),
       TpWPS: g('TpWPS'), tmin: g('tmin'), tmax: g('tmax'), Tmax: g('Tmax'),
-      group: W.MAT[$('mat').value].group, mat: $('mat').value, comp, coupleU: $('coupleU').checked
+      group: W.MAT[$('mat').value].group, mat: $('mat').value, comp, coupleU: $('coupleU').checked,
+      kEff: KCAL.on && Number.isFinite(KCAL.k) ? KCAL.k : undefined,
+      corr: ML.use && ML.fit ? mlCorr() : undefined
     };
   }
 
@@ -57,6 +59,9 @@
 
   /* ---------------- stanje ---------------- */
   let P = null, E = null, REC = null, ST = null, SM = null;
+  const MC = { pts: null, name: '', stats: null };        // učitani (izmjereni ili simulirani) toplinski ciklus
+  const KCAL = { k: NaN, on: false, from: '' };           // kalibrirana toplinska iskoristivost
+  const ML = { fit: null, use: false, demo: false };      // naučene korekcije iz dnevnika
   const FEM = { x: null, y: null };
   let CERT = null;   // podaci iz potvrđenog certifikata
   let probeY = 3, probeAuto = true;
@@ -79,7 +84,7 @@
     REC = W.recommend(p, { coupleU: p.coupleU });
     ST = W.stressProfile(p, p.T0);
     if (probeAuto) probeY = Math.max(0.5, W.distanceForPeak(p, 1350, p.T0));
-    renderSummary(); renderReco(); renderStress(); renderCycle(); renderCompare(); renderPW();
+    renderSummary(); renderReco(); renderStress(); renderCycle(); renderCompare(); renderPW(); renderCcx();
     fieldStateDirty = true;
     if (!playing) drawField();
   }
@@ -103,10 +108,11 @@
     $('pin').style.left = clamp(e.risk, 0, 100) + '%';
     $('tint').setAttribute('aria-label', 'Indeks rizika ' + Math.round(e.risk) + ' od 100');
     $('mQ').textContent = fmt(e.Q, 2);
+    $('mQ').nextElementSibling.textContent = KCAL.on ? `unos topline, kJ/mm (k = ${fmt(e.k, 2)}, kalibriran)` : 'unos topline, kJ/mm';
     $('mT85').textContent = fmt(e.t85, 1);
-    $('mT85l').textContent = `t8/5, s (${e.is2D ? '2D' : '3D'} odvođenje; cilj ${fmt(p.tmin, 0)}–${fmt(p.tmax, 0)})`;
+    $('mT85l').textContent = `t8/5, s (${e.is2D ? '2D' : '3D'} odvođenje; cilj ${fmt(p.tmin, 0)}–${fmt(p.tmax, 0)})` + (p.corr && p.corr.t85 ? ', naučena korekcija' : '');
     $('mHV').textContent = Math.round(e.HV);
-    $('mHVl').textContent = `najveća tvrdoća ZUT-a, HV (granica ${e.HVlim})`;
+    $('mHVl').textContent = `najveća tvrdoća ZUT-a, HV (granica ${e.HVlim})` + (p.corr && p.corr.hv ? ', naučena korekcija' : '');
     $('mHVbox').classList.toggle('alert', e.HV > e.HVlim);
     if (e.TpCET <= 0) { $('mTp').textContent = '0'; $('mTpl').textContent = 'potrebno predgrijavanje (CET), °C: nije potrebno'; }
     else { $('mTp').textContent = Math.round(e.TpCET); $('mTpl').textContent = 'potrebno predgrijavanje (CET), °C'; }
@@ -184,8 +190,8 @@
     const tEnd = clamp(3 * E.t85 + 25, 30, 300);
     const c = W.thermalCycle(p, probeY, p.T0, tEnd);
     CYC = c;
-    const o = { W: 520, H: 300, L: 50, R: 14, T: 14, B: 40, x0: c.pts[0][0], x1: tEnd, y0: 0,
-      y1: Math.min(Math.max(c.peak * 1.08, 900), 1700) };
+    const o = { W: 520, H: 300, L: 50, R: 14, T: MC.pts ? 34 : 14, B: 40, x0: c.pts[0][0], x1: tEnd, y0: 0,
+      y1: Math.min(Math.max(c.peak * 1.08, MC.stats ? MC.stats.peak * 1.06 : 0, 900), 2100) };
     o.xt = ticks(Math.ceil(o.x0), o.x1, 6); o.yt = ticks(0, o.y1, 6); o.xl = 'vrijeme, s'; o.yl = 'temperatura, °C';
     const A = axes(o); let s = A.s;
     const straw = css('--straw'), bronze = css('--bronze'), blue = css('--blue'), ink = css('--ink');
@@ -198,6 +204,14 @@
     }
     const pts = c.pts.map(q => A.X(q[0]).toFixed(1) + ',' + A.Y(Math.min(q[1], o.y1)).toFixed(1)).join(' ');
     s += `<polyline fill="none" stroke="${blue}" stroke-width="2.5" points="${pts}"/>`;
+    if (MC.pts && MC.stats) {                         // učitani ciklus, vrh poravnat s vrhom modela
+      const sh = c.tPeak - MC.stats.tPeak;
+      const mp = MC.pts.filter(q => q[0] + sh >= o.x0 && q[0] + sh <= o.x1)
+        .map(q => A.X(q[0] + sh).toFixed(1) + ',' + A.Y(Math.min(Math.max(q[1], 0), o.y1)).toFixed(1));
+      s += `<polyline fill="none" stroke="${bronze}" stroke-width="2" stroke-dasharray="6 3" points="${mp.join(' ')}"/>`;
+      s += `<line x1="${o.L}" x2="${o.L + 22}" y1="12" y2="12" stroke="${blue}" stroke-width="2.5"/><text x="${o.L + 28}" y="16" style="fill:${ink}">Rosenthal</text>`;
+      s += `<line x1="${o.L + 120}" x2="${o.L + 142}" y1="12" y2="12" stroke="${bronze}" stroke-width="2" stroke-dasharray="6 3"/><text x="${o.L + 148}" y="16" style="fill:${ink}">učitani ciklus</text>`;
+    }
     s += `<circle id="cycMark" r="5" fill="${ink}" cx="-20" cy="-20"/>`;
     $('cycle').innerHTML = s;
     CYC.axes = A; CYC.o = o;
@@ -206,7 +220,72 @@
     if (Number.isFinite(c.t85)) txt += `t8/5 s krivulje: <b>${fmt(c.t85, 1)} s</b> (Rosenthal, F = 1); prema EN 1011-2: <b>${fmt(E.t85, 1)} s</b>.`;
     else txt += 'Točka ne doseže 800 °C, pa za nju t8/5 nije definiran.';
     $('cycleOut').innerHTML = txt;
+    renderMeasured();
   }
+
+  /* ---------------- učitani toplinski ciklus i kalibracija k ---------------- */
+  function renderMeasured() {
+    if (!MC.pts || !MC.stats || !P) { $('mcOut').innerHTML = ''; return; }
+    const y = parseFloat($('mcY').value);
+    const st = MC.stats;
+    const pBase = { ...P, kEff: undefined };
+    const model = Number.isFinite(y) ? W.thermalCycle(P, y, P.T0, clamp(3 * (st.t85 || E.t85) + 40, 40, 400)) : null;
+    const row = (n, a, b, u, dd) => `<tr><td>${n}</td><td>${Number.isFinite(a) ? fmt(a, dd) + ' ' + u : '–'}</td><td>${Number.isFinite(b) ? fmt(b, dd) + ' ' + u : '–'}</td></tr>`;
+    let h = `<div class="tablewrap"><table class="t"><tr><th></th><th>Učitano</th><th>Model (Rosenthal, ${fmt(y, 1)} mm${KCAL.on ? ', kalibrirani k' : ''})</th></tr>` +
+      row('Vršna temperatura', st.peak, model && Math.min(model.peak, 3000), '°C', 0) +
+      row('t8/5', st.t85, model && model.t85, 's', 1) + '</table></div>' +
+      `<p class="note">Za usporedbu, t8/5 prema EN 1011-2 iznosi ${fmt(E.t85, 1)} s. Rosenthal raspoređuje toplinu po cijeloj debljini, pa uz površinu daje niže vršne temperature od stvarnih; t8/5 se u ZUT-u s udaljenošću mijenja malo.</p>`;
+    if (!Number.isFinite(st.t85)) h += '<p class="warnline">Učitani ciklus ne prolazi kroz 800 i 500 °C, pa t8/5 i kalibracija nisu mogući.</p>';
+    else {
+      h += `<div class="row" style="margin-top:10px"><button type="button" id="mcCal">Kalibriraj k prema ovom ciklusu</button>` +
+        (KCAL.on ? `<button type="button" class="ghost" id="mcReset">Vrati k iz norme (${fmt(W.K[P.proc], 1)})</button>` : '') + '</div>';
+      if (Number.isFinite(KCAL.k)) h += `<p class="note">Kalibrirani k = <b>${fmt(KCAL.k, 3)}</b> (norma za ${P.proc}: ${fmt(W.K[P.proc], 1)})${KCAL.note ? '. ' + esc(KCAL.note) : ''}. ${KCAL.on ? 'Primijenjen je u svim izračunima na stranici i u generatoru za CalculiX.' : ''}</p>`;
+      if (Number.isFinite(KCAL.k) && !KCAL.on) h += `<div class="row"><button type="button" id="mcApply">Primijeni k = ${fmt(KCAL.k, 2)}</button></div>`;
+    }
+    $('mcOut').innerHTML = h;
+    const b1 = $('mcCal'), b2 = $('mcReset'), b3 = $('mcApply');
+    if (b1) b1.onclick = () => {
+      const r = W.calibrateK(pBase, y, st.t85, P.T0);
+      if (!Number.isFinite(r.k)) { $('mcStatus').textContent = 'Kalibracija nije moguća: ' + r.reason + '.'; return; }
+      Object.assign(KCAL, { k: r.k, on: false, note: r.reason || '', from: MC.name });
+      renderMeasured();
+    };
+    if (b2) b2.onclick = () => { KCAL.on = false; render(); };
+    if (b3) b3.onclick = () => { KCAL.on = true; render(); };
+  }
+
+  function parseTwoColsTime(text) {
+    const out = [];
+    text.replace(/^\ufeff/, '').split(/\r?\n/).forEach(line => {
+      const t = line.trim(); if (!t || /^[#!*]/.test(t)) return;
+      let parts = t.includes(';') ? t.split(';') : t.includes('\t') ? t.split('\t') : (t.match(/,/g) || []).length === 1 && /\s/.test(t) === false ? t.split(',') : t.split(/\s+/);
+      parts = parts.map(x => x.trim()).filter(Boolean);
+      if (parts.length < 2) return;
+      const a = parseFloat(parts[0].replace(',', '.')), b = parseFloat(parts[1].replace(',', '.'));
+      if (Number.isFinite(a) && Number.isFinite(b)) out.push([a, b]);
+    });
+    return out.sort((p, q) => p[0] - q[0]);
+  }
+  $('mcFile').addEventListener('change', async ev => {
+    const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
+    const pts = parseTwoColsTime(await f.text());
+    if (pts.length < 5) { $('mcStatus').textContent = `U "${f.name}" nije pronađeno barem 5 redaka s vremenom i temperaturom.`; return; }
+    Object.assign(MC, { pts, name: f.name, stats: W.cycleStats(pts) });
+    KCAL.k = NaN;
+    const y = parseFloat($('mcY').value);
+    if (Number.isFinite(y)) { probeY = y; probeAuto = false; }
+    $('mcStatus').textContent = `Učitano ${pts.length} točaka iz "${f.name}". Upiši udaljenost točke mjerenja od osi zavara.`;
+    if (P) { renderCycle(); if (!playing) drawField(); }
+  });
+  $('mcY').addEventListener('input', () => {
+    const y = parseFloat($('mcY').value);
+    if (MC.pts && Number.isFinite(y) && y > 0) { probeY = y; probeAuto = false; KCAL.k = KCAL.on ? KCAL.k : NaN; if (P) { renderCycle(); if (!playing) drawField(); } }
+  });
+  $('mcClear').addEventListener('click', () => {
+    Object.assign(MC, { pts: null, name: '', stats: null });
+    $('mcStatus').textContent = 'Učitani ciklus je uklonjen.' + (KCAL.on ? ' Kalibrirani k ostaje primijenjen dok ga ne vratiš na vrijednost iz norme.' : '');
+    if (P) renderCycle();
+  });
 
   /* ---------------- zaostala naprezanja ---------------- */
   function renderStress() {
@@ -217,7 +296,7 @@
     // --- uzdužno ---
     const ym = Math.min(half, Math.max(4 * M.MM.b, 1.3 * M.OK.b, 30));
     const femX = FEM.x && FEM.x.length ? FEM.x : null;
-    let yLo = -0.6 * p.Re, yHi = 1.15 * p.Re;
+    let yLo = Math.min(-0.6 * p.Re, showOK ? 1.1 * M.OK.comp : 0), yHi = 1.15 * p.Re;
     if (femX) femX.forEach(q => { yLo = Math.min(yLo, q[1] * 1.1); yHi = Math.max(yHi, q[1] * 1.1); });
     const o = { W: 760, H: 320, L: 56, R: 16, T: 40, B: 40, x0: -ym, x1: ym, y0: yLo, y1: yHi };
     o.xt = ticks(-ym, ym, 8); o.yt = ticks(o.y0, o.y1, 6); o.xl = 'udaljenost od osi zavara y, mm'; o.yl = 'σx, MPa';
@@ -263,7 +342,7 @@
     const TR = M.TR, femY = FEM.y && FEM.y.length ? FEM.y : null;
     let t0 = -p.Re * 0.6, t1 = p.Re * 0.9;
     if (femY) femY.forEach(q => { t0 = Math.min(t0, q[1] * 1.1); t1 = Math.max(t1, q[1] * 1.1); });
-    const o2 = { W: 760, H: 270, L: 56, R: 16, T: 16, B: 40, x0: 0, x1: p.L, y0: t0, y1: t1 };
+    const o2 = { W: 760, H: 290, L: 56, R: 16, T: 40, B: 40, x0: 0, x1: p.L, y0: t0, y1: t1 };
     o2.xt = ticks(0, p.L, 8); o2.yt = ticks(t0, t1, 6); o2.xl = 'položaj duž zavara x, mm'; o2.yl = 'σy, MPa';
     const A2 = axes(o2); let s2 = A2.s;
     s2 += `<line x1="${o2.L}" x2="${o2.W - o2.R}" y1="${A2.Y(0)}" y2="${A2.Y(0)}" stroke="${ink}" opacity=".6"/>`;
@@ -275,7 +354,7 @@
     s2 += c2(TR.at, ink, 2.4, '');
     if (femY) s2 += femY.filter(q => q[0] >= 0 && q[0] <= p.L).map(q => `<circle cx="${A2.X(q[0]).toFixed(1)}" cy="${A2.Y(q[1]).toFixed(1)}" r="2.6" fill="${blue}"/>`).join('');
     const leg2 = [['slobodne ploče', muted, '6 4'], [`s ukliještenošću (${({ low: 'mala', mid: 'srednja', high: 'velika' })[p.restr]})`, ink, '']].concat(femY ? [['CalculiX', blue, '']] : []);
-    leg2.forEach((it, i) => { const yy = o2.T + 14 + 16 * i; s2 += `<line x1="${o2.W - o2.R - 230}" x2="${o2.W - o2.R - 208}" y1="${yy - 4}" y2="${yy - 4}" stroke="${it[1]}" stroke-width="3" ${it[2] ? `stroke-dasharray="${it[2]}"` : ''}/><text x="${o2.W - o2.R - 202}" y="${yy}" style="fill:${ink}">${it[0]}</text>`; });
+    let lx2 = o2.L; leg2.forEach(it => { s2 += `<line x1="${lx2}" x2="${lx2 + 22}" y1="14" y2="14" stroke="${it[1]}" stroke-width="3" ${it[2] ? `stroke-dasharray="${it[2]}"` : ''}/><text x="${lx2 + 28}" y="18" style="fill:${ink}">${it[0]}</text>`; lx2 += 40 + it[0].length * 7; });
     $('stressT').innerHTML = s2;
 
     $('stressOut').innerHTML = `Uzdužno: vrh ≈ Re = <b>${fmt(p.Re, 0)} MPa</b>; vlačna zona ±${fmt(M.MM.b, 1)} mm (Masubuchi i Martin) odnosno ±${fmt(M.OK.b, 1)} mm (Okerblom). ` +
@@ -522,12 +601,133 @@
     $('chart').innerHTML = s;
   }
 
+  /* ---------------- spremanje datoteka ---------------- */
+  // U Claude artefaktu kroz mogućnost "downloads" (preglednik traži potvrdu), drugdje običnim preuzimanjem
+  async function saveFile(filename, data, type = 'text/plain;charset=utf-8') {
+    const blob = data instanceof Blob ? data : new Blob([data], { type });
+    const dl = (window.claude && typeof window.claude.use === 'function') ? await window.claude.use('downloads').catch(() => null) : null;
+    if (dl) {
+      try { await dl.save({ filename, data: blob }); return 'saved'; }
+      catch (e) { return e && e.code === 'unavailable' ? 'unavailable' : 'declined'; }
+    }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    return 'saved';
+  }
+
+  /* ---------------- generator za CalculiX ---------------- */
+  function ccxOpts() { return { mesh: $('ccxMesh').value, tCool: Math.max(200, parseFloat($('ccxCool').value) || 3000), yProbe: probeY, Weld: W }; }
+  function renderCcx() {
+    if (!P || !window.CCX) return;
+    const i = window.CCX.build(P, { ...ccxOpts(), infoOnly: true }).info;
+    $('ccxInfo').innerHTML = `Mreža ${i.nx} × ${i.ny} × ${i.nz} elemenata (${i.elems.toLocaleString('hr-HR')} elemenata, ${i.nodes.toLocaleString('hr-HR')} čvorova), ` +
+      `Goldak b = ${fmt(i.g.b, 1)} mm, c = ${fmt(i.g.c, 1)} mm, Q = ${fmt(i.Qtot, 0)} W${KCAL.on ? ' (kalibrirani k)' : ''}; ` +
+      `${i.nSteps} mehaničkih koraka. Procjena trajanja: oko <b>${i.estMin} min</b>.`;
+    const w = [];
+    if (P.joint !== 'butt') w.push('Generator izrađuje model sučeljenog spoja; za kutni spoj geometriju treba prilagoditi.');
+    if (i.nodes > 30000) w.push('Velik model: računanje može trajati više od sat vremena. Za prvu provjeru odaberi grubu mrežu ili kraći zavar.');
+    $('ccxWarn').textContent = w.join(' ');
+  }
+  const ccxSave = async (which) => {
+    if (!P) { $('ccxMsg').textContent = 'Ispravi ulazne podatke prije izrade modela.'; return; }
+    $('ccxMsg').textContent = 'Izrađujem datoteku…';
+    await new Promise(r => setTimeout(r, 20));
+    let name, text;
+    if (which === 'py') { name = 'izvuci_rezultate.py'; text = window.CCX.POST; }
+    else {
+      const b = window.CCX.build(P, ccxOpts());
+      name = which === 'th' ? 'toplina.inp' : 'naprezanja.inp';
+      text = which === 'th' ? b.toplina : b.naprezanja;
+    }
+    const r = await saveFile(name, text);
+    $('ccxMsg').textContent = r === 'saved' ? `${name} je spremljen (${Math.round(text.length / 1024)} kB). Obje .inp datoteke moraju biti izrađene s istim ulazima.` :
+      r === 'unavailable' ? 'Spremanje datoteke ovdje nije dostupno.' : `${name} nije spremljen.`;
+  };
+  $('ccxTh').addEventListener('click', () => ccxSave('th'));
+  $('ccxMe').addEventListener('click', () => ccxSave('me'));
+  $('ccxPy').addEventListener('click', () => ccxSave('py'));
+  ['ccxMesh', 'ccxCool'].forEach(id => $(id).addEventListener('input', renderCcx));
+
   /* ---------------- dnevnik zavara ---------------- */
   const LKEY = 'zavarDnevnik.v1';
   let LOG = [];
   function loadLog() { try { LOG = JSON.parse(localStorage.getItem(LKEY) || '[]'); if (!Array.isArray(LOG)) LOG = []; } catch (e) { LOG = []; } }
   function saveLog() { try { localStorage.setItem(LKEY, JSON.stringify(LOG)); } catch (e) { msg('Spremanje u preglednik nije uspjelo; izvezi CSV da ne izgubiš podatke.'); } }
   const msg = t => { $('lgMsg').textContent = t; };
+
+  // U Claude artefaktu dnevnik je zajednički (baza artefakta), drugdje ostaje u pregledniku.
+  const STORE = { shared: false, db: null, readOnly: false };
+  const COL = 'dnevnik';
+  const plain = r => JSON.parse(JSON.stringify(r));
+  function dbFail(e) {
+    const c = e && e.code;
+    if (c === 'invalid_argument') { STORE.readOnly = true; applyReadOnly(); msg('Nemaš dopuštenje za upis u zajednički dnevnik; možeš ga pregledavati i izvesti u CSV.'); }
+    else if (c === 'quota_exceeded') msg('Zajednički dnevnik je pun. Izvezi CSV i obriši stare zapise.');
+    else if (c === 'resource_exhausted') msg('Previše spremanja odjednom. Pričekaj trenutak i pokušaj ponovno.');
+    else msg('Spremanje u zajednički dnevnik nije uspjelo. Pokušaj ponovno.');
+    return false;
+  }
+  async function logAdd(entries) {
+    if (!STORE.shared) { LOG.push(...entries); saveLog(); renderLog(); return true; }
+    if (STORE.readOnly) { msg('Zajednički dnevnik možeš samo pregledavati.'); return false; }
+    try { for (const r of entries) await STORE.db.collection(COL).doc(r.id).set(plain(r)); return true; }
+    catch (e) { return dbFail(e); }
+  }
+  async function logPatch(r, mj) {
+    if (!STORE.shared) { Object.assign(r.mj, mj); saveLog(); return true; }
+    if (STORE.readOnly) return false;
+    try { await STORE.db.collection(COL).doc(r.id).update({ mj: plain(mj) }); return true; }
+    catch (e) { return dbFail(e); }
+  }
+  async function logDelete(ids) {
+    if (!STORE.shared) { LOG = LOG.filter(x => !ids.includes(x.id)); saveLog(); renderLog(); return true; }
+    if (STORE.readOnly) return false;
+    try { for (const id of ids) await STORE.db.collection(COL).doc(id).delete(); return true; }
+    catch (e) { return dbFail(e); }
+  }
+  function applyReadOnly() {
+    ['lgSave', 'lgDemo', 'lgClear'].forEach(id => { $(id).disabled = STORE.readOnly; });
+    $('lgImport').disabled = STORE.readOnly;
+    $('lgMigrateRow').hidden = true;
+    renderLog();
+  }
+  let logRenderPending = false;
+  function scheduleLogRender() {                        // ne prekidaj unos u tablici
+    if ($('lgTable').contains(document.activeElement)) { logRenderPending = true; return; }
+    renderLog();
+  }
+  $('lgTable').addEventListener('focusout', () => setTimeout(() => {
+    if (logRenderPending && !$('lgTable').contains(document.activeElement)) { logRenderPending = false; renderLog(); }
+  }, 0));
+
+  async function initSharedLog() {
+    if (!window.claude || typeof window.claude.use !== 'function') return;
+    const db = await window.claude.use('db').catch(() => null);
+    if (!db) return;
+    Object.assign(STORE, { shared: true, db });
+    const user = await window.claude.use('user').catch(() => null);
+    const can = user && typeof user.can === 'function' ? await user.can('data.write').catch(() => null) : null;
+    STORE.readOnly = can === false;
+    const local = LOG.slice();
+    LOG = [];
+    $('lgStore').textContent = 'Dnevnik je zajednički: zapise vide i dopunjuju svi kojima je ova stranica podijeljena. Može se izvesti u CSV za daljnju obradu.';
+    msg(STORE.readOnly ? 'Zajednički dnevnik možeš pregledavati, ali ne i mijenjati.' : '');
+    applyReadOnly();
+    db.collection(COL).orderBy('ts').onSnapshot(snap => {
+      LOG = snap.docs.map(d => plain(d.data()));
+      scheduleLogRender();
+      if (ML.use) render();
+    }, e => { msg(e && e.code === 'revoked' ? 'Pristup zajedničkom dnevniku više nije dostupan.' : 'Veza sa zajedničkim dnevnikom je prekinuta. Osvježi stranicu.'); });
+    if (local.length && !STORE.readOnly) {
+      $('lgMigrateRow').hidden = false;
+      $('lgMigrate').textContent = `Prenesi ${local.length} ${local.length === 1 ? 'lokalni zapis' : 'lokalnih zapisa'} u zajednički dnevnik`;
+      $('lgMigrate').onclick = async () => {
+        $('lgMigrate').disabled = true;
+        if (await logAdd(local)) { try { localStorage.removeItem(LKEY); } catch (e) { /* nije važno */ } $('lgMigrateRow').hidden = true; msg(`Preneseno ${local.length} zapisa.`); }
+        $('lgMigrate').disabled = false;
+      };
+    }
+  }
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
   function entryFrom(p, extra = {}) {
@@ -536,7 +736,7 @@
       id: uid(), ts: new Date().toISOString(), oznaka: '', zavarivac: '', napomena: '', demo: false,
       in: { mat: p.mat, Re: p.Re, d: p.d, B: p.B, L: p.L, talina: CERT ? CERT.heat || '' : '', CEVcert: CERT && Number.isFinite(CERT.cev) ? CERT.cev : '', joint: p.joint, restr: p.restr, proc: p.proc, HD: p.HD, I: p.I, U: p.U, v: p.v,
         TpWPS: p.TpWPS, T0: p.T0, Ta: p.Ta, RH: p.RH, tmin: p.tmin, tmax: p.tmax, Tmax: p.Tmax, ...p.comp },
-      pred: { Q: e.Q, t85: e.t85, HV: e.HV, TpCET: e.TpCET, risk: e.risk },
+      pred: { Q: e.Q, t85: e.t85, HV: e.HV, t85model: e.t85model, HVmodel: e.HVmodel, k: e.k, TpCET: e.TpCET, risk: e.risk },
       mj: { t85: '', HV: '', def: '', sig: '', greske: '' }, ...extra
     };
   }
@@ -559,6 +759,7 @@
         </tr>`).join('');
       $('lgTable').innerHTML = `<table class="t"><thead><tr><th>Datum</th><th>Oznaka</th><th>Zavarivač</th><th>Materijal</th><th>T₀, °C</th><th>Q</th><th>t8/5 pred.</th><th>HV pred.</th><th>Rizik</th>${MJ.map(m => `<th>${m[1]}</th>`).join('')}<th>Greške</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     }
+    renderML();
     renderScatter('scHV', 'HV', 'HV');
     renderScatter('scT', 't85', 's');
   }
@@ -567,13 +768,13 @@
     const tr = ev.target.closest('tr'); if (!tr) return;
     const r = LOG.find(x => x.id === tr.dataset.id); if (!r) return;
     const k = ev.target.dataset.k;
-    r.mj[k] = k === 'greske' ? ev.target.value : (ev.target.value === '' ? '' : parseFloat(ev.target.value));
-    saveLog(); renderScatter('scHV', 'HV', 'HV'); renderScatter('scT', 't85', 's');
+    const val = k === 'greske' ? ev.target.value : (ev.target.value === '' ? '' : parseFloat(ev.target.value));
+    logPatch(r, { ...r.mj, [k]: val }).then(ok => { if (ok && !STORE.shared) { renderML(); renderScatter('scHV', 'HV', 'HV'); renderScatter('scT', 't85', 's'); if (ML.use) render(); } });
   });
   $('lgTable').addEventListener('click', ev => {
     const b = ev.target.closest('button'); if (!b) return;
     const tr = b.closest('tr'); const r = LOG.find(x => x.id === tr.dataset.id); if (!r) return;
-    if (b.dataset.act === 'del') { LOG = LOG.filter(x => x !== r); saveLog(); renderLog(); msg('Zapis je obrisan.'); }
+    if (b.dataset.act === 'del') { logDelete([r.id]).then(ok => { if (ok) msg('Zapis je obrisan.'); }); }
     if (b.dataset.act === 'load') { loadEntry(r); msg(`Ulazi zapisa ${r.oznaka || ''} učitani su u obrazac.`); $('procjena').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' }); }
   });
 
@@ -587,9 +788,40 @@
     probeAuto = true; render();
   }
 
+  /* ---------------- učenje iz dnevnika ---------------- */
+  function mlRows() {
+    const num = v => (v === '' || v == null || !Number.isFinite(+v)) ? NaN : +v;
+    return LOG.filter(r => ML.demo || !r.demo).map(r => ({ pt: num(r.pred.t85model ?? r.pred.t85), mt: num(r.mj.t85), ph: num(r.pred.HVmodel ?? r.pred.HV), mh: num(r.mj.HV) }));
+  }
+  function mlCorr() {
+    const f = ML.fit; if (!f) return undefined;
+    const c = {};
+    if (f.t85 && f.t85.useful) c.t85 = f.t85.c;
+    if (f.hv && f.hv.useful) c.hv = { a: f.hv.a, b: f.hv.b };
+    return (c.t85 || c.hv) ? c : undefined;
+  }
+  function renderML() {
+    ML.fit = W.fitCorrections(mlRows());
+    const f = ML.fit, rows = [];
+    const cellErr = (base, loo) => Number.isFinite(loo) ? `<td class="${loo < base ? 'good' : 'bad'}">${fmt(loo, 1)}</td>` : '<td>–</td>';
+    if (f.t85) rows.push(`<tr><td>t8/5</td><td>${f.t85.n}</td><td>izmjereno = ${fmt(f.t85.c, 3)} · predviđeno</td><td>${fmt(f.t85.maeBase, 1)} s</td>${cellErr(f.t85.maeBase, f.t85.maeLoo)}<td>${f.t85.useful ? 'da' : 'ne'}</td></tr>`);
+    if (f.hv) rows.push(`<tr><td>Tvrdoća ZUT-a</td><td>${f.hv.n}</td><td>${f.hv.model === 'pravac' ? `HV = ${fmt(f.hv.a, 1)} + ${fmt(f.hv.b, 3)} · HVpred` : `HV = HVpred ${f.hv.a >= 0 ? '+' : '−'} ${fmt(Math.abs(f.hv.a), 1)}`}</td><td>${fmt(f.hv.maeBase, 1)} HV</td>${cellErr(f.hv.maeBase, f.hv.maeLoo)}<td>${f.hv.useful ? 'da' : 'ne'}</td></tr>`);
+    $('mlTable').innerHTML = rows.length ? `<tr><th>Veličina</th><th>Zapisa</th><th>Naučeni model</th><th>Pogreška bez korekcije</th><th>Pogreška s korekcijom (LOO)</th><th>Korisna</th></tr>${rows.join('')}` : '';
+    const corr = mlCorr();
+    $('mlUse').disabled = !corr;
+    if (!corr && ML.use) { ML.use = false; $('mlUse').checked = false; }
+    $('mlOut').innerHTML = !rows.length
+      ? (LOG.some(r => r.demo) && !ML.demo ? 'Nema zapisa s izmjerenim vrijednostima. Upiši izmjereni t8/5 ili tvrdoću u dnevnik ili uključi primjere.' : 'Nema zapisa s izmjerenim vrijednostima. Upiši izmjereni t8/5 ili tvrdoću u tablicu iznad.')
+      : (corr ? `Korekcija smanjuje pogrešku na zapisima koji nisu korišteni za učenje.${ML.use ? ' Uključena je u procjenu na vrhu stranice.' : ''}` : 'Za korisnu korekciju treba barem 3 zapisa, a korekcija mora smanjiti pogrešku na izostavljenim zapisima.');
+  }
+  $('mlDemo').addEventListener('change', () => { ML.demo = $('mlDemo').checked; renderLog(); if (ML.use) render(); });
+  $('mlUse').addEventListener('change', () => { ML.use = $('mlUse').checked; render(); });
+
   function renderScatter(id, key, unit) {
-    const pts = LOG.filter(r => r.mj[key] !== '' && r.mj[key] != null && Number.isFinite(+r.mj[key]))
-      .map(r => ({ p: r.pred[key], m: +r.mj[key], lab: r.oznaka, demo: r.demo }));
+    // os x: predviđanje modela bez naučene korekcije (na tome se korekcija i uči)
+    const pk = key === 'HV' ? 'HVmodel' : 't85model';
+    const pts = LOG.filter(r => (ML.demo || !r.demo || !LOG.some(x => !x.demo)) && r.mj[key] !== '' && r.mj[key] != null && Number.isFinite(+r.mj[key]))
+      .map(r => ({ p: Number.isFinite(r.pred[pk]) ? r.pred[pk] : r.pred[key], m: +r.mj[key], lab: r.oznaka, demo: r.demo }));
     const svg = $(id);
     if (!pts.length) { svg.innerHTML = `<text x="180" y="150" text-anchor="middle">Nema izmjerenih vrijednosti. Upiši ih u tablicu iznad.</text>`; return; }
     const all = pts.flatMap(q => [q.p, q.m]);
@@ -599,6 +831,12 @@
     const A = axes(o); let s = A.s;
     const ink = css('--ink'), bronze = css('--bronze'), straw = css('--straw');
     s += `<line x1="${A.X(a)}" y1="${A.Y(a)}" x2="${A.X(b)}" y2="${A.Y(b)}" stroke="${bronze}" stroke-dasharray="5 4"/>`;
+    const ff = ML.fit && (key === 'HV' ? ML.fit.hv : ML.fit.t85);
+    if (ff && ff.n >= 3) {                                   // naučena korekcija
+      const g = x => key === 'HV' ? ff.a + ff.b * x : ff.c * x;
+      s += `<line x1="${A.X(a)}" y1="${A.Y(clamp(g(a), a, b))}" x2="${A.X(b)}" y2="${A.Y(clamp(g(b), a, b))}" stroke="${css('--blue')}" stroke-width="2"/>`;
+      s += `<text x="${o.W - o.R - 4}" y="${o.H - o.B - 8}" text-anchor="end" style="fill:${css('--blue')}">naučena korekcija</text>`;
+    }
     pts.forEach(q => {
       s += q.demo ? `<circle cx="${A.X(q.p)}" cy="${A.Y(q.m)}" r="5.5" fill="none" stroke="${straw}" stroke-width="2.5"/>`
                   : `<circle cx="${A.X(q.p)}" cy="${A.Y(q.m)}" r="5.5" fill="${ink}"/>`;
@@ -612,9 +850,7 @@
   $('lgSave').addEventListener('click', () => {
     if (!P) { msg('Ispravi ulazne podatke prije spremanja.'); return; }
     const r = entryFrom(P, { oznaka: $('lgId').value.trim(), zavarivac: $('lgWelder').value.trim(), napomena: $('lgNote').value.trim() });
-    LOG.push(r); saveLog(); renderLog();
-    msg(`Zavar ${r.oznaka || 'bez oznake'} je spremljen. Izmjerene rezultate upiši u tablicu.`);
-    $('lgId').value = '';
+    logAdd([r]).then(ok => { if (ok) { msg(`Zavar ${r.oznaka || 'bez oznake'} je spremljen. Izmjerene rezultate upiši u tablicu.`); $('lgId').value = ''; } });
   });
   let clearArmed = 0;
   $('lgClear').addEventListener('click', () => {
@@ -626,20 +862,21 @@
       return;
     }
     clearArmed = 0; $('lgClear').textContent = 'Obriši sve';
-    LOG = []; saveLog(); renderLog(); msg('Dnevnik je obrisan.');
+    logDelete(LOG.map(x => x.id)).then(ok => { if (ok) msg('Dnevnik je obrisan.'); });
   });
   $('lgDemo').addEventListener('click', () => {
     if (!P) { msg('Ispravi ulazne podatke prije dodavanja primjera.'); return; }
     let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+    const add = [];
     [0, 8, 18, 30, 45, 70].forEach((T, i) => {
       const r = entryFrom({ ...P, T0: T }, { oznaka: 'PR-' + (i + 1), zavarivac: i % 2 ? 'Z2' : 'Z1', napomena: 'PRIMJER, izmišljeni podaci', demo: true });
       r.mj.t85 = +(r.pred.t85 * (1.08 + 0.2 * rnd())).toFixed(1);
       r.mj.HV = Math.round(r.pred.HV + 12 + 30 * rnd());
       r.mj.def = +(1.2 + 0.02 * r.pred.Q * 10 + 0.4 * rnd()).toFixed(2);
       r.mj.greske = T < 10 ? 'pukotine' : 'nema';
-      LOG.push(r);
+      add.push(r);
     });
-    saveLog(); renderLog(); msg('Dodano je 6 primjera s izmišljenim izmjerenim vrijednostima (označeni žutom crtom).');
+    logAdd(add).then(ok => { if (ok) msg('Dodano je 6 primjera s izmišljenim izmjerenim vrijednostima (označeni žutom crtom).'); });
   });
 
   // CSV: razdjelnik ';', decimalni zarez, UTF-8 s BOM-om (otvara se izravno u hrvatskom Excelu)
@@ -662,17 +899,7 @@
     const lines = [CSVCOLS.map(c => c[0]).join(';'), ...LOG.map(r => CSVCOLS.map(c => cell(c[1](r))).join(';'))];
     const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const filename = 'dnevnik-zavara-' + new Date().toISOString().slice(0, 10) + '.csv';
-    (async () => {
-      const dl = (window.claude && typeof window.claude.use === 'function') ? await window.claude.use('downloads').catch(() => null) : null;
-      if (dl) {
-        try { await dl.save({ filename, data: blob }); msg(`Izvezeno ${LOG.length} zapisa.`); }
-        catch (e) { msg(e && e.code === 'unavailable' ? 'Spremanje datoteke ovdje nije dostupno.' : 'Izvoz nije spremljen.'); }
-        return;
-      }
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      msg(`Izvezeno ${LOG.length} zapisa.`);
-    })();
+    saveFile(filename, blob).then(r => msg(r === 'saved' ? `Izvezeno ${LOG.length} zapisa.` : r === 'unavailable' ? 'Spremanje datoteke ovdje nije dostupno.' : 'Izvoz nije spremljen.'));
   });
 
   function parseCSV(text) {
@@ -698,20 +925,19 @@
       if (ix('T0_C') < 0 || ix('I_A') < 0) { msg('Datoteka nema očekivane stupce. Uvezi CSV izvezen iz ovog dnevnika.'); return; }
       const num = s => { if (s === '' || s == null) return ''; const v = parseFloat(String(s).replace(',', '.')); return Number.isFinite(v) ? v : ''; };
       const get = (r, n) => ix(n) >= 0 ? r[ix(n)] : '';
-      let n = 0;
+      const add = [];
       rows.forEach(r => {
         const inp = { mat: get(r, 'materijal'), talina: get(r, 'talina'), CEVcert: num(get(r, 'CEV_certifikat')), Re: num(get(r, 'Re_MPa')), d: num(get(r, 'debljina_mm')), B: num(get(r, 'sirina_B_mm')), L: num(get(r, 'duljina_L_mm')), joint: get(r, 'spoj') || 'butt',
           restr: get(r, 'uklijestenost') || 'mid', proc: get(r, 'postupak') || 'MAG', HD: num(get(r, 'HD')), I: num(get(r, 'I_A')), U: num(get(r, 'U_V')),
           v: num(get(r, 'v_cm_min')), TpWPS: num(get(r, 'Tp_WPS_C')), T0: num(get(r, 'T0_C')), Ta: num(get(r, 'Ta_C')), RH: num(get(r, 'RH_pct')),
           tmin: num(get(r, 't85_min_s')), tmax: num(get(r, 't85_max_s')), Tmax: num(get(r, 'Tmax_C')) };
         CHEM.forEach(k => { inp[k] = num(get(r, k)); });
-        LOG.push({ id: uid(), ts: get(r, 'datum') || new Date().toISOString(), oznaka: get(r, 'oznaka'), zavarivac: get(r, 'zavarivac'),
+        add.push({ id: uid(), ts: get(r, 'datum') || new Date().toISOString(), oznaka: get(r, 'oznaka'), zavarivac: get(r, 'zavarivac'),
           napomena: get(r, 'napomena'), demo: get(r, 'primjer') === 'da', in: inp,
           pred: { Q: num(get(r, 'Q_kJ_mm')), t85: num(get(r, 't85_pred_s')), HV: num(get(r, 'HV_pred')), TpCET: num(get(r, 'Tp_CET_C')), risk: num(get(r, 'rizik_pred')) },
           mj: { t85: num(get(r, 't85_mj_s')), HV: num(get(r, 'HV_mj')), def: num(get(r, 'kutna_def_mj_deg')), sig: num(get(r, 'sigma_mj_MPa')), greske: get(r, 'greske') } });
-        n++;
       });
-      saveLog(); renderLog(); msg(`Uvezeno ${n} zapisa.`);
+      if (await logAdd(add)) msg(`Uvezeno ${add.length} zapisa.`);
     } catch (e) { msg('Datoteku nije moguće pročitati kao CSV.'); }
     ev.target.value = '';
   });
@@ -1419,7 +1645,7 @@ Pravila:
   applyMaterial(); applyProcess();
   $('HD').value = '5';
   legend();
-  loadLog(); renderLog();
+  loadLog(); renderLog(); initSharedLog();
   if (!playing) { xs = 120; setPlay(false); }
   render();
   requestAnimationFrame(tick);

@@ -41,12 +41,15 @@
 
   /* ---------- osnovne veličine ---------- */
 
+  // Toplinska iskoristivost: iz norme, ili kalibrirana iz izmjerenog toplinskog ciklusa (p.kEff)
+  const kOf = p => (Number.isFinite(p.kEff) && p.kEff > 0) ? p.kEff : K[p.proc];
+
   function heatInput(p) {                  // kJ/mm
     const vmm = p.v * 10 / 60;             // cm/min -> mm/s
-    return K[p.proc] * p.U * p.I / vmm / 1000;
+    return kOf(p) * p.U * p.I / vmm / 1000;
   }
 
-  function arcPower(p) { return K[p.proc] * p.U * p.I; }   // W, efektivna
+  function arcPower(p) { return kOf(p) * p.U * p.I; }   // W, efektivna
 
   function coupledVoltage(proc, U0, I0, I) {
     return U0 + ULINE[proc].b * (I - I0);
@@ -261,8 +264,13 @@
     const T0 = Math.min(p.T0, 450);
     const Q = heatInput(p);
     const en = t85EN(Q, T0, p.d, p.joint);
+    // naučena korekcija iz dnevnika zavara (izmjereni t8/5 i tvrdoća), ako je uključena
+    const corr = p.corr || {};
+    const t85model = en.t85;
+    if (Number.isFinite(corr.t85) && corr.t85 > 0) en.t85 = en.t85 * corr.t85;
     const { CE, CET } = carbonEq(p.comp);
-    const HV = hvMax(p.comp, en.t85);
+    const HVmodel = hvMax(p.comp, en.t85);
+    const HV = corr.hv ? corr.hv.a + corr.hv.b * HVmodel : HVmodel;
     const HVlim = HV_LIMIT[p.group] || 380;
     const cet = preheatCET(CET, p.d, p.HD, Q);
     const Tneed = Math.max(p.TpWPS, cet.Tp, 0);
@@ -283,7 +291,82 @@
         r: RESTR[p.restr] * clamp(CE / 0.5) }
     ];
     const risk = 100 * (1 - causes.reduce((acc, c) => acc * (1 - c.w * c.r), 1));
-    return { Q, ...en, CE, CET, HV, HVlim, TpCET: cet.Tp, cetWarn: cet.warn, Tneed, Td, causes, risk };
+    return { Q, ...en, t85model, CE, CET, HV, HVmodel, HVlim, TpCET: cet.Tp, cetWarn: cet.warn, Tneed, Td, causes, risk, k: kOf(p) };
+  }
+
+  /* ---------- učenje iz dnevnika zavara ---------- */
+  // Za mali broj uzoraka: jednostavne korekcije s unakrsnom validacijom "izostavi jedan" (LOO).
+  function fitCorrections(rows) {
+    const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
+    const mae = a => a.length ? mean(a.map(Math.abs)) : NaN;
+    const out = {};
+    // t8/5: izmjereno = c · predviđeno (pravac kroz ishodište)
+    const T = rows.filter(r => Number.isFinite(r.pt) && Number.isFinite(r.mt) && r.pt > 0);
+    if (T.length) {
+      const fitC = arr => arr.reduce((s, r) => s + r.mt * r.pt, 0) / arr.reduce((s, r) => s + r.pt * r.pt, 0);
+      const loo = T.length >= 3 ? T.map((r, i) => { const c = fitC(T.filter((_, j) => j !== i)); return r.mt - c * r.pt; }) : [];
+      out.t85 = { n: T.length, c: fitC(T), maeBase: mae(T.map(r => r.mt - r.pt)), maeLoo: loo.length ? mae(loo) : NaN };
+      out.t85.useful = T.length >= 3 && out.t85.maeLoo < out.t85.maeBase;
+    }
+    // tvrdoća: pomak (HV + a) ili pravac (a + b·HV), bira se manja LOO pogreška
+    const H = rows.filter(r => Number.isFinite(r.ph) && Number.isFinite(r.mh));
+    if (H.length) {
+      const fitShift = arr => ({ a: mean(arr.map(r => r.mh - r.ph)), b: 1 });
+      const fitLine = arr => {
+        const mx = mean(arr.map(r => r.ph)), my = mean(arr.map(r => r.mh));
+        const sxx = arr.reduce((s, r) => s + (r.ph - mx) ** 2, 0);
+        if (sxx < 1e-9) return fitShift(arr);
+        const b = arr.reduce((s, r) => s + (r.ph - mx) * (r.mh - my), 0) / sxx;
+        return { a: my - b * mx, b };
+      };
+      const looErr = fit => H.length >= 3 ? H.map((r, i) => { const m = fit(H.filter((_, j) => j !== i)); return r.mh - (m.a + m.b * r.ph); }) : [];
+      const shift = { name: 'pomak', ...fitShift(H), maeLoo: mae(looErr(fitShift)) };
+      const line = { name: 'pravac', ...fitLine(H), maeLoo: H.length >= 5 ? mae(looErr(fitLine)) : NaN };
+      const best = Number.isFinite(line.maeLoo) && line.maeLoo < shift.maeLoo ? line : shift;
+      out.hv = { n: H.length, model: best.name, a: best.a, b: best.b, maeBase: mae(H.map(r => r.mh - r.ph)), maeLoo: best.maeLoo, shift, line };
+      out.hv.useful = H.length >= 3 && best.maeLoo < out.hv.maeBase;
+    }
+    return out;
+  }
+
+  /* ---------- kalibracija toplinske iskoristivosti iz izmjerenog ciklusa ---------- */
+  // Traži k za koji Rosenthalov ciklus na udaljenosti y ima izmjereni t8/5 (t8/5 raste s k).
+  function calibrateK(p, y, t85meas, T0) {
+    // t8/5 se u ZUT-u malo mijenja s udaljenošću; ako modelna točka ne doseže 800 °C (Rosenthal raspoređuje toplinu
+    // po debljini, pa podcjenjuje vršne temperature uz površinu), koristi se točka uz rub taline
+    let moved = false;
+    const t85At = k => {
+      const pk = { ...p, kEff: k };
+      let c = thermalCycle(pk, y, T0, Math.max(60, 4 * t85meas + 30));
+      if (!Number.isFinite(c.t85)) { moved = true; c = thermalCycle(pk, Math.max(0.3, distanceForPeak(pk, 1350, T0)), T0, Math.max(60, 4 * t85meas + 30)); }
+      return c.t85;
+    };
+    let lo = 0.2, hi = 1.3;
+    const fLo = t85At(lo), fHi = t85At(hi);
+    if (!Number.isFinite(fLo) || !Number.isFinite(fHi)) return { k: NaN, reason: 'točka ne doseže 800 °C uz zadane parametre' };
+    if (t85meas < fLo) return { k: lo, reason: 'Izmjereni t8/5 kraći je od modela i uz k = 0,2', bound: true };
+    if (t85meas > fHi) return { k: hi, reason: 'Izmjereni t8/5 dulji je od modela i uz k = 1,3', bound: true };
+    for (let i = 0; i < 40; i++) {
+      const m = (lo + hi) / 2, fm = t85At(m);
+      if (!Number.isFinite(fm) || fm < t85meas) lo = m; else hi = m;
+    }
+    const kf = (lo + hi) / 2;
+    moved = !Number.isFinite(thermalCycle({ ...p, kEff: kf }, y, T0, Math.max(60, 4 * t85meas + 30)).t85);
+    return { k: kf, reason: moved ? 'Model u točki mjerenja ne doseže 800 °C, pa je t8/5 uspoređen uz rub taline' : '' };
+  }
+
+  // Izmjereni ciklus: vrh i t8/5 iz niza [t, T]
+  function cycleStats(pts) {
+    if (!pts || pts.length < 3) return null;
+    let ip = 0; pts.forEach((q, i) => { if (q[1] > pts[ip][1]) ip = i; });
+    const cross = lvl => {
+      for (let i = ip; i < pts.length - 1; i++) if (pts[i][1] >= lvl && pts[i + 1][1] < lvl) {
+        const f = (pts[i][1] - lvl) / (pts[i][1] - pts[i + 1][1]); return pts[i][0] + f * (pts[i + 1][0] - pts[i][0]);
+      }
+      return NaN;
+    };
+    const t800 = cross(800), t500 = cross(500);
+    return { peak: pts[ip][1], tPeak: pts[ip][0], t800, t500, t85: t500 - t800 };
   }
 
   /* ---------- preporuka i procesni prozor ---------- */
@@ -335,7 +418,7 @@
   const api = { K, ULINE, HD_DEFAULT, MAT, HV_LIMIT, LAMBDA, RHOC, DIFF, T_MELT,
     heatInput, coupledVoltage, t85EN, carbonEq, preheatCET, hvMax, dewPoint,
     besselK0, rosenthal, sourceState, thermalCycle, peakTemp, distanceForPeak, peakRise, stressModels, integrate, distanceForRise, stressProfile,
-    evaluate, recommend, processWindow, variant, clamp };
+    evaluate, recommend, processWindow, variant, clamp, fitCorrections, calibrateK, cycleStats, kOf };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Weld = api;

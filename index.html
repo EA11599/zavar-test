@@ -18,7 +18,7 @@
     <p>Upiši stvarne uvjete na radnom mjestu i parametre iz WPS-a. Program računa toplinski ciklus, tvrdoću ZUT-a, potrebno predgrijavanje i raspodjelu zaostalih naprezanja, procjenjuje rizik i predlaže korekciju parametara.</p>
   </div>
   <div class="head-actions">
-    <div class="stamp">Demo verzija 3</div>
+    <div class="stamp">Demo verzija 4</div>
     <div class="row">
       <button type="button" class="toggle-notes" id="toggleNotes" aria-pressed="false">Prikaži sve napomene</button>
       <button type="button" class="ghost" id="printBtn">Ispiši izvještaj</button>
@@ -239,6 +239,16 @@
       <h3 class="sh">Toplinski ciklus odabrane točke</h3>
       <div class="chartbox"><svg id="cycle" viewBox="0 0 520 300" role="img" aria-label="Toplinski ciklus"></svg></div>
       <p class="readout" id="cycleOut"></p>
+      <div class="measbox noprint">
+        <b>Izmjereni ili simulirani ciklus</b>
+        <div class="row" style="margin-top:8px">
+          <label class="filebtn">Učitaj ciklus (CSV)<input type="file" id="mcFile" accept=".csv,.txt,text/csv,text/plain" class="sr"></label>
+          <label class="inl">Udaljenost od osi zavara, mm<input type="number" id="mcY" step="0.1" min="0.3" value="3"></label>
+          <button type="button" class="ghost" id="mcClear">Ukloni ciklus</button>
+        </div>
+        <p class="hint" id="mcStatus" role="status">Dva stupca: vrijeme u s i temperatura u °C, npr. zapis termopara ili ciklus_T.csv iz CalculiX-a.</p>
+        <div id="mcOut"></div>
+      </div>
     </div>
   </div>
   <details class="how"><summary>Kako se računa temperaturno polje</summary>
@@ -264,8 +274,34 @@
     <div class="tablewrap" style="padding:0 18px"><table class="t" id="stressTable"></table></div>
     <p class="warnline" id="stressWarn" style="padding:0 18px"></p>
     <h3 class="sh" style="border-top:1px solid var(--line);margin-top:14px">Poprečna naprezanja σy, duž zavara</h3>
-    <div class="chartbox"><svg id="stressT" viewBox="0 0 760 270" role="img" aria-label="Poprečna zaostala naprezanja duž zavara"></svg></div>
+    <div class="chartbox"><svg id="stressT" viewBox="0 0 760 290" role="img" aria-label="Poprečna zaostala naprezanja duž zavara"></svg></div>
     <p class="readout" id="stressOut"></p>
+    <div class="ccxgen noprint">
+      <b>Model za CalculiX</b>
+      <p class="hint" style="margin:4px 0 8px">Iz trenutnih ulaza izrađuje ulazne datoteke za MKE analizu sučeljenog spoja: toplinsku (pomični Goldakov izvor) i mehaničku (zaostala naprezanja).</p>
+      <div class="fields">
+        <label>Gustoća mreže
+          <select id="ccxMesh"><option value="gruba">Gruba (brza provjera)</option><option value="srednja" selected>Srednja</option><option value="fina">Fina</option></select>
+        </label>
+        <label>Trajanje hlađenja, s<input type="number" id="ccxCool" value="3000" min="200" step="100"></label>
+      </div>
+      <p class="computed" id="ccxInfo"></p>
+      <p class="warnline" id="ccxWarn"></p>
+      <div class="row" style="margin-top:8px">
+        <button type="button" id="ccxTh">Preuzmi toplina.inp</button>
+        <button type="button" id="ccxMe">Preuzmi naprezanja.inp</button>
+        <button type="button" class="ghost" id="ccxPy">Preuzmi izvuci_rezultate.py</button>
+      </div>
+      <p class="hint" id="ccxMsg" role="status"></p>
+      <details class="how"><summary>Kako se pokreće</summary>
+        <p>Sve tri datoteke spremi u istu mapu i u njoj pokreni redom:</p>
+        <div class="f">ccx -i toplina</div>
+        <div class="f">ccx -i naprezanja</div>
+        <div class="f">python izvuci_rezultate.py</div>
+        <p>Prva analiza računa temperaturno polje dok Goldakov izvor prolazi duž zavara i tijekom hlađenja. Druga je mehanička: u svakom koraku učitava temperature iz <code>toplina.frd</code> i računa elastoplastične deformacije, a na kraju ploču ohladi na temperaturu okoline. Skripta zatim izdvaja tri CSV datoteke: <code>profil_sx.csv</code> i <code>profil_sy.csv</code> učitaju se ovdje ispod, kao rezultati iz CalculiX-a, a <code>ciklus_T.csv</code> u dijelu s toplinskim ciklusom, za usporedbu s Rosenthalovim rješenjem.</p>
+        <p>Model je polovica ploče (simetrija u ravnini zavara) s heksaedarskim elementima. Pomični izvor zadan je bez korisničkih potprograma: svaki element u zoni izvora dobiva vlastitu krivulju toplinskog toka u vremenu, uzorkovanu iz Goldakove raspodjele, a ukupna snaga normira se na k·U·I. Svojstva materijala ovisna o temperaturi su orijentacijske literaturne vrijednosti za konstrukcijski čelik i za rad ih treba zamijeniti podacima za stvarni materijal. Generator izrađuje model sučeljenog spoja.</p>
+      </details>
+    </div>
     <div class="fem noprint">
       <b>Rezultati iz CalculiX-a</b>
       <div class="row" style="margin-top:8px">
@@ -344,7 +380,7 @@
 <!-- ============ DNEVNIK ============ -->
 <section class="block" id="dnevnik">
   <h2>Dnevnik zavara</h2>
-  <p class="lead">Spremi trenutni zavar s ulazima i izračunima, a nakon ispitivanja upiši izmjerene rezultate. Podaci ostaju u ovom pregledniku i mogu se izvesti u CSV za daljnju obradu.</p>
+  <p class="lead">Spremi trenutni zavar s ulazima i izračunima, a nakon ispitivanja upiši izmjerene rezultate. <span id="lgStore">Podaci ostaju u ovom pregledniku i mogu se izvesti u CSV za daljnju obradu.</span></p>
   <div class="sheet">
     <div style="padding:14px 18px" class="noprint">
       <div class="fields">
@@ -360,12 +396,31 @@
         <button type="button" class="ghost" id="lgClear">Obriši sve</button>
       </div>
       <p class="hint" id="lgMsg" role="status"></p>
+      <div class="row" id="lgMigrateRow" hidden style="margin-top:8px"><button type="button" class="ghost" id="lgMigrate">Prenesi lokalne zapise u zajednički dnevnik</button></div>
     </div>
     <div class="tablewrap log" id="lgTable"></div>
   </div>
   <div class="grid2" style="margin-top:28px">
     <div class="sheet"><h3 class="sh">Tvrdoća ZUT-a: predviđeno i izmjereno</h3><div class="chartbox"><svg id="scHV" viewBox="0 0 360 300" role="img" aria-label="Predviđena i izmjerena tvrdoća"></svg></div></div>
     <div class="sheet"><h3 class="sh">t8/5: predviđeno i izmjereno</h3><div class="chartbox"><svg id="scT" viewBox="0 0 360 300" role="img" aria-label="Predviđeni i izmjereni t8/5"></svg></div></div>
+  </div>
+  <div class="sheet" style="margin-top:28px">
+    <h3 class="sh">Učenje iz izmjerenih rezultata</h3>
+    <div class="row" style="padding:12px 18px 0">
+      <label class="check" style="grid-column:auto"><input type="checkbox" id="mlDemo"> Uključi primjere (izmišljeni podaci)</label>
+      <label class="check" style="grid-column:auto"><input type="checkbox" id="mlUse"> Koristi naučenu korekciju u procjeni</label>
+    </div>
+    <div class="tablewrap" style="padding:8px 18px 0"><table class="t" id="mlTable"></table></div>
+    <p class="readout" id="mlOut" style="padding-top:10px"></p>
+    <details class="how"><summary>Kako program uči</summary>
+      <p>Iz zapisa u dnevniku s izmjerenim vrijednostima program uči dvije korekcije modela:</p>
+      <ul>
+        <li><b>t8/5:</b> izmjereno = c · predviđeno. Faktor c obuhvaća sve što norma ne vidi: stvarnu toplinsku iskoristivost, geometriju spoja, položaj termopara.</li>
+        <li><b>Tvrdoća ZUT-a:</b> pomak (HV + a) ili pravac (a + b·HV). Pravac se uzima tek od 5 zapisa i samo ako daje manju pogrešku.</li>
+      </ul>
+      <p>Točnost se provjerava unakrsnom validacijom "izostavi jedan": model se nauči bez jednog zapisa i provjeri na njemu, za svaki zapis redom. Korekcija se smije uključiti samo ako je ta pogreška manja od pogreške modela bez korekcije. To je namjerno jednostavan, provjerljiv početak; kad bude više podataka, isti izvezeni CSV može se upotrijebiti za složenije modele (npr. random forest ili neuronsku mrežu) u Pythonu.</p>
+      <p>Primjeri u dnevniku izrađeni su sa sustavnim odstupanjem (tvrdoća oko 12 HV viša, t8/5 oko 8 % dulji), pa uz uključene primjere model to odstupanje treba pronaći.</p>
+    </details>
   </div>
   <details class="how"><summary>Čemu služi dnevnik</summary>
     <p>Svaki zapis sadrži sve ulaze, izračunate vrijednosti i izmjerene rezultate. Izvezeni CSV (razdjelnik točka-zarez, decimalni zarez) izravno je skup podataka za treniranje modela, a stupac "zavarivač" omogućuje kasniju prilagodbu preporuka pojedinoj osobi.</p>
@@ -378,9 +433,9 @@
   <h2>Plan razvoja</h2>
   <p class="lead">Ova stranica je prva faza. Pojednostavljena pravila procjene u kasnijim fazama zamjenjuju rezultati MKE simulacija i model treniran na eksperimentalnim podacima.</p>
   <ol class="steps">
-    <li class="now"><b>Kalkulator i sučelje</b><span>EN 1011-2 (t8/5, predgrijavanje CET), tvrdoća ZUT-a, Rosenthalovo polje, modeli zaostalih naprezanja, učitavanje certifikata, procesni prozor, dnevnik zavara.</span>
+    <li class="now"><b>Kalkulator i sučelje</b><span>EN 1011-2 (t8/5, predgrijavanje CET), tvrdoća ZUT-a, Rosenthalovo polje, modeli zaostalih naprezanja, učitavanje certifikata, procesni prozor, zajednički dnevnik zavara.</span>
       <details class="how"><summary>Kako se radi</summary><p>Web-aplikacija u HTML-u i JavaScriptu, bez instalacije, objavljena preko GitHub Pages. Izračuni su u zasebnom modulu pokrivenom automatskim testovima, pa sučelje ostaje isto dok se "mozak" u pozadini mijenja.</p></details></li>
-    <li><b>MKE simulacija u CalculiX-u</b><span>Toplinsko-mehanička simulacija zavarivanja kojom se umjesto pretpostavke dobiva stvarna raspodjela temperatura i zaostalih naprezanja.</span>
+    <li class="now"><b>MKE simulacija u CalculiX-u</b><span>Generator ulaznih datoteka i skripta za rezultate su gotovi (dio "Modeli naprezanja"); slijedi usporedba s mjerenjima i svojstva stvarnog materijala.</span>
       <details class="how"><summary>Kako se radi</summary>
         <p>CalculiX je besplatan program za metodu konačnih elemenata, sa sintaksom ulaznih datoteka bliskom Abaqusu. Simulacija se provodi u dva koraka:</p>
         <ul>
@@ -391,7 +446,7 @@
       </details></li>
     <li><b>Planirani pokusi</b><span>Namjerno izazivanje nepovoljnih uvjeta (hladan ili vlažan komad, prevelik ili premalen unos topline) i mjerenje rezultata.</span>
       <details class="how"><summary>Kako se radi</summary><p>Plan pokusa (faktorski ili Taguchijev) da se s najmanje uzoraka obuhvati utjecaj temperature komada, unosa topline, vlažnosti i predgrijavanja. Svaki uzorak upisuje se u dnevnik zavara.</p></details></li>
-    <li><b>Model strojnog učenja</b><span>Treniranje modela na izmjerenim i simuliranim podacima; zamjena demo pravila stvarnim predviđanjem.</span>
+    <li class="now"><b>Model strojnog učenja</b><span>Prvi korak radi: korekcija t8/5 i tvrdoće iz dnevnika s unakrsnom validacijom, te kalibracija k iz izmjerenog ciklusa. Slijede složeniji modeli kad bude više podataka.</span>
       <details class="how"><summary>Kako se radi</summary><p>Kao ulazi koriste se i fizikalne veličine (Q, t8/5, CE, CET), a ne samo sirovi parametri. Usporedit će se jednostavniji modeli (regresija, random forest) s neuronskom mrežom, uz unakrsnu validaciju. Simulacije iz CalculiX-a proširuju mali eksperimentalni skup.</p></details></li>
     <li><b>Prilagodba zavarivaču</b><span>Uključivanje stvarno postignutih parametara pojedinog zavarivača u preporuku.</span>
       <details class="how"><summary>Kako se radi</summary><p>Iz dnevnika se za svakog zavarivača računa razlika između zadanih i postignutih parametara (npr. sustavno brže vođenje). Program je uzima u obzir, pa preporuka postaje prilagođena osobi, a ne samo WPS-u.</p></details></li>
@@ -405,6 +460,7 @@
 
 <script src="physics.js"></script>
 <script src="cert.js"></script>
+<script src="calculix.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
