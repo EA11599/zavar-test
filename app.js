@@ -1153,13 +1153,19 @@ Pravila:
     } catch (e) {
       const code = e && e.code ? e.code : 'upstream_error';
       if (CLAUDE_OFF.includes(code)) SAMPLE.ok = false;
-      throw { code, msg: claudeMsg(code) };
+      throw { code, msg: claudeMsg(code) + ` (kod: ${code})` };
     } finally { clearInterval(timer); }
   }
 
-  async function blobFor(file, canvas) {
-    if (file && SAMPLE.types.includes(file.type) && (!SAMPLE.maxBytes || file.size <= SAMPLE.maxBytes)) return file;
-    return canvasBlob(canvas);
+  // Slika za Claudea uvijek se iscrta na stranici i šalje kao JPEG (isto za fotografiju i PDF),
+  // najviše 2400 px po duljoj stranici; platforma je ionako smanjuje na oko 1,2 megapiksela.
+  async function imageForClaude(src) {
+    const k = Math.min(1, 2400 / Math.max(src.width, src.height));
+    const cv = document.createElement('canvas'); cv.width = Math.round(src.width * k); cv.height = Math.round(src.height * k);
+    const c = cv.getContext('2d'); c.fillStyle = '#fff'; c.fillRect(0, 0, cv.width, cv.height);
+    c.imageSmoothingQuality = 'high'; c.drawImage(src, 0, 0, cv.width, cv.height);
+    const jpg = await new Promise(r => cv.toBlob(b => r(b), 'image/jpeg', 0.92));
+    return jpg || canvasBlob(cv);
   }
 
   // OCR naknadno, za stranice koje su preskočene dok se čekao Claude
@@ -1205,12 +1211,19 @@ Pravila:
       }
       if (SAMPLE.ok && (!res || !res.rows.length)) {
         try {
-          res = await readWithClaude(isPdf ? await canvasBlob(out.preview) : await blobFor(file, out.preview), 'stranica', 'Certifikat');
+          res = await readWithClaude(await imageForClaude(out.preview), 'stranica', 'Certifikat');
           source = 'claude';
           if (!res.rows.length) { note = 'Claude na slici nije pronašao tablicu kemijskog sastava. '; res = null; }
         } catch (e) { note = (e && e.msg) || claudeMsg('upstream_error'); note += ' '; res = null; }
       }
-      if (!res) { source = 'ocr'; await ensureOcr(out); res = window.Cert.parse(out.tokens); }
+      if (!res) {
+        source = 'ocr';
+        try { await ensureOcr(out); res = window.Cert.parse(out.tokens); }
+        catch (e) {                               // npr. u artefaktu, gdje OCR biblioteka nije dostupna
+          res = { rows: [], cev: null, ReH: null, grade: null, heat: null, warnings: [], blocks: [] };
+          note += 'OCR ovdje nije dostupan. ';
+        }
+      }
       if (source !== 'claude') {
       // Kod OCR-a: ako tablica nije pročitana ili joj nedostaju glavni elementi, čita se po ćelijama
       const weak = r => !r.rows.length || ['C', 'Si', 'Mn'].some(k => r.rows[0].values[k] === undefined);
@@ -1279,11 +1292,15 @@ Pravila:
     try {
       let r2 = { rows: [] }, src = 'ocr', note = '';
       if (SAMPLE.ok) {
-        try { r2 = await readWithClaude(await canvasBlob(crop), 'isječak s tablicom kemijskog sastava', 'Označeno područje'); src = 'claude'; }
+        try { r2 = await readWithClaude(await imageForClaude(crop), 'isječak s tablicom kemijskog sastava', 'Označeno područje'); src = 'claude'; }
         catch (e) { note = (e && e.msg) || ''; r2 = { rows: [] }; }
       }
-      if (!r2.rows.length) { src = 'ocr'; r2 = await readTableCells(crop, 'Označeno područje'); }
       if (!r2.rows.length) {
+        src = 'ocr';
+        try { r2 = await readTableCells(crop, 'Označeno područje'); }
+        catch (e) { r2 = { rows: [] }; note += (note ? ' ' : '') + 'OCR ovdje nije dostupan.'; }
+      }
+      if (!r2.rows.length && !/OCR ovdje nije dostupan/.test(note)) {
         const toks = await ocrCanvas(crop, 1, 'Označeno područje', { psm: 6, targetW: 3200, maxScale: 10, hLine: 0.15, vLine: 0.45 });
         r2 = window.Cert.parse(toks);
       }
