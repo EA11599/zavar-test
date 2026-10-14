@@ -21,7 +21,7 @@
   };
   const FACTORS = [1, 0.1, 0.01, 0.001, 0.0001];
   // Poznate OCR zamjene simbola u zaglavlju (M se čita kao H, fi, N…); vrijede samo uz oznaku %
-  const OCR_SYM = { FIN: 'Mn', FN: 'Mn', HN: 'Mn', NN: 'Mn', RN: 'Mn', MM: 'Mn', HIN: 'Mn', HO: 'Mo', H0: 'Mo', MO0: 'Mo', SL: 'Si', S1: 'Si', '5I': 'Si', '51': 'Si',
+  const OCR_SYM = { FIN: 'Mn', FN: 'Mn', HN: 'Mn', NN: 'Mn', RN: 'Mn', MM: 'Mn', HIN: 'Mn', HO: 'Mo', H0: 'Mo', MO0: 'Mo', CUT: 'Cu', CUI: 'Cu', GUT: 'Cu', PS: 'P', PH: 'P', P5: 'P', NI1: 'Ni', NIL: 'Ni', CRS: 'Cr', CR5: 'Cr', MN5: 'Mn', SL: 'Si', S1: 'Si', '5I': 'Si', '51': 'Si',
     CT: 'Cr', OR: 'Cr', GR: 'Cr', CN: 'Cu', GU: 'Cu', NL: 'Ni', N1: 'Ni', TL: 'Ti', T1: 'Ti', NO: 'Mo', AI: 'Al', A1: 'Al' };
 
   function normSym(t) {
@@ -53,6 +53,7 @@
   function parseNum(t) {
     let s = String(t).trim().replace(/[≤<]/g, '').replace(/^[~≈]/, '');
     s = s.replace(/O(?=[\d,.])|(?<=[\d,.])O/g, '0');          // česta OCR zamjena O → 0
+    s = s.replace(/^[CcOoQD(\[{]{1,2}(?=[.,]\d)/, '0');          // "C,24", "Cc,11", "(,05" → 0,…
     if (!/^[-+]?(\d+([.,]\d+)?|[.,]\d+)$/.test(s)) return null;
     const v = parseFloat(s.replace(',', '.'));
     return Number.isFinite(v) ? { v, lt: /[≤<]/.test(t) } : null;
@@ -135,16 +136,27 @@
     };
     lines.forEach((L, li) => {
       let cols = [], fuzzy = 0;
+      // brojevi u sljedećem retku: oznaka iznad koje stoji broj je stupac, i kad je slovo iskrivljeno
+      const NB = lines[li + 1] && lines[li + 1].page === L.page && lines[li + 1].y - L.y < 4 * hMed
+        ? lines[li + 1].tokens.filter(t => parseNum(t.t)).map(cx) : [];
+      const over = t => NB.some(x => Math.abs(x - cx(t)) < Math.max(2.5 * hMed, 0.8 * t.w));
+      const unknown = [];
       L.tokens.forEach((t, ti) => {
         const nxt = L.tokens[ti + 1];
-        const pct = /%/.test(t.t) || (nxt && /^[%°]$/.test(nxt.t) && nxt.x - (t.x + t.w) < 2 * hMed);
+        const pct = /%/.test(t.t) || (nxt && /^[%°§©*&8]{1,2}$/.test(nxt.t) && nxt.x - (t.x + t.w) < 2 * hMed);
         let s = normSym(t.t), fz = false;
-        if (!s && pct) {
-          const key = t.t.replace(/[%:.,;|\-_'"’”“~*]/g, '').toUpperCase();
+        const key = t.t.replace(/[%:.,;|\-_'"’”“~*§©&\[\](){}]/g, '').toUpperCase();
+        if (!s && (pct || over(t))) {
           s = OCR_SYM[key] || fuzzySym(t.t.includes('%') ? t.t : t.t + '%'); fz = !!s;
         }
         if (s && !cols.some(c => c.sym === s)) { cols.push({ sym: s, x: cx(t), fuzzy: fz }); if (fz) fuzzy++; }
+        else if (!s && over(t) && /[A-Za-z\[(]/.test(t.t) && t.t.length <= 4 && !/^[%°§©*&8]+$/.test(t.t)) unknown.push({ x: cx(t), t: t.t });
       });
+      // Nepročitan prvi stupac tablice sastava gotovo je uvijek C (redoslijed C, Si, Mn, P, S…)
+      if (!cols.some(c => c.sym === 'C') && unknown.length && cols.some(c => ['Si', 'Mn', 'P', 'S'].includes(c.sym))) {
+        const u = unknown.sort((a, b) => a.x - b.x)[0];
+        if (cols.every(c => c.x > u.x)) { cols.push({ sym: 'C', x: u.x, fuzzy: true, guessed: true }); fuzzy++; }
+      }
       cols.sort((a, b) => a.x - b.x);
       const elems = cols.filter(c => !['CEV', 'CET', 'PCM'].includes(c.sym));
       const hasC = cols.some(c => c.sym === 'C');
@@ -193,7 +205,7 @@
         if (isMain && values.C === undefined) continue;
         const label = words.filter(w => cx(w) < firstCol - 0.3 * gap).map(w => w.t).join(' ').replace(/[|\[\]_]/g, ' ').replace(/\s+/g, ' ').trim();
         if (/\b(min|max|spec|specified|required|zahtjev|zahtijevano|norma|soll|limit|grenz)/i.test(label)) continue;
-        Object.keys(values).forEach(k2 => { const c = cols.find(q => q.sym === k2); if (c && c.fuzzy && !flags[k2]) flags[k2] = 'simbol nesigurno pročitan'; });
+        Object.keys(values).forEach(k2 => { const c = cols.find(q => q.sym === k2); if (c && c.fuzzy && !flags[k2]) flags[k2] = c.guessed ? 'simbol nije pročitan, pretpostavljen je C (prvi stupac)' : 'simbol nesigurno pročitan'; });
         found.push({ label, values, flags, y: R.y });
       }
       if (!found.length) return;
@@ -289,7 +301,10 @@
     const raw = String(t || '').trim();
     if (!raw) return null;
     const s = normSym(raw); if (s) return s;
-    const letters = raw.replace(/[^A-Za-z]/g, '');
+    const letters = raw.replace(/[^A-Za-z0-9]/g, '');
+    const key = letters.toUpperCase();
+    if (OCR_SYM[key]) return OCR_SYM[key];
+    if (/^MR/.test(key) && key.length <= 4) return 'Mn';           // "Mr", "Mrs", "MrCA" za Mn%
     if (/%/.test(raw) || letters.length <= 2) return fuzzySym(raw.includes('%') ? raw : raw + '%');
     return null;
   }

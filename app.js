@@ -947,6 +947,9 @@
       for (let r = hi + 1; r < Math.min(rows.length, hi + 9); r++) {
         const row = rows[r];
         if (row.y - (rows[r - 1].y + rows[r - 1].h) > 3 * row.h) break;      // razmak: nova tablica
+        // drugačiji raspored stupaca znači da je počela druga tablica (npr. mehanička svojstva)
+        const same = header.filter(col => row.cells.some(q => Math.abs(q.x - col.cell.x) < 0.2 * col.cell.w && Math.abs(q.w - col.cell.w) < 0.3 * col.cell.w)).length;
+        if (same < 0.6 * header.length) break;
         await setMode('');
         const labCells = row.cells.filter(c => !c.empty && c.x + c.w <= firstX + 2);
         let lab = '';
@@ -984,7 +987,9 @@
         out.push({ label: lab || ('redak ' + (out.length + 1)), values, flags, page: 1, labOk });
       }
       // ako barem jedan redak ima čitljivu oznaku (npr. M14x70), retci bez oznake su granice ili zaglavlja
-      const named = out.filter(r => r.labOk);
+      let named = out.filter(r => r.labOk);
+      // kad oznake stvarnih redaka imaju znamenke (M14x70, broj taline), kratka oznaka bez znamenki je pogrešno pročitan "Max"/"Min"
+      if (named.some(r => /\d/.test(r.label))) named = named.filter(r => /\d/.test(r.label) || r.label.replace(/[^A-Za-z]/g, '').length > 3);
       return { rows: (named.length ? named : out).map(({ labOk, ...r }) => r) };
     } finally { await worker.terminate(); }
   }
