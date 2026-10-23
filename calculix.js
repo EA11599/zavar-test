@@ -13,17 +13,51 @@
 (function (root) {
   'use strict';
 
-  // Orijentacijska svojstva konstrukcijskog čelika ovisna o temperaturi (literaturne vrijednosti
-  // tipa S355; za rad ih treba zamijeniti podacima za stvarni materijal).
-  const PROPS = {
-    T:     [20, 200, 400, 600, 800, 1000, 1200, 1450, 1700, 3000],
-    // iznad tališta vodljivost postupno raste kao zamjena za strujanje taline (uobičajeno u literaturi)
-    k:     [50, 47, 41, 33, 27, 29, 31, 34, 70, 90],               // W/(m·K)
-    c:     [450, 520, 600, 750, 650, 650, 650, 650, 700, 700],     // J/(kg·K)
-    E:     [210000, 200000, 175000, 110000, 40000, 20000, 15000, 10000, 10000, 10000], // MPa
-    alpha: [1.20e-5, 1.27e-5, 1.35e-5, 1.40e-5, 1.45e-5, 1.48e-5, 1.50e-5, 1.50e-5, 1.50e-5, 1.50e-5], // 1/K, sekantni od 20 °C
-    yieldFactor: [1.0, 0.90, 0.70, 0.45, 0.12, 0.06, 0.05, 0.05, 0.05, 0.05]   // × Re
+  // Svojstva ugljičnog čelika ovisna o temperaturi prema EN 1993-1-2:2005 (Eurokod 3, dio 1-2), točke 3.2 i 3.4:
+  // toplinska vodljivost (3.4.1.3), specifični toplinski kapacitet (3.4.1.2, s vrhom na 735 °C zbog
+  // magnetske pretvorbe), toplinsko produljenje (3.4.1.1) i faktori smanjenja k_y,θ i k_E,θ (tablica 3.1).
+  // Norma vrijedi do 1200 °C; iznad toga vrijednosti su numeričke pretpostavke (označene u PROPS.src).
+  const EC3 = {
+    lambda: T => T < 800 ? 54 - 3.33e-2 * T : 27.3,
+    c: T => T < 600 ? 425 + 7.73e-1 * T - 1.69e-3 * T * T + 2.22e-6 * T ** 3
+      : T < 735 ? 666 + 13002 / (738 - T)
+      : T < 900 ? 545 + 17820 / (T - 731) : 650,
+    elong: T => T < 750 ? 1.2e-5 * T + 0.4e-8 * T * T - 2.416e-4
+      : T < 860 ? 1.1e-2 : 2e-5 * T - 6.2e-3,
+    // tablica 3.1: θ, k_y (efektivna granica tečenja), k_E (nagib elastičnog dijela)
+    tab: [[20, 1, 1], [100, 1, 1], [200, 1, .9], [300, 1, .8], [400, 1, .7], [500, .78, .6], [600, .47, .31],
+      [700, .23, .13], [800, .11, .09], [900, .06, .0675], [1000, .04, .045], [1100, .02, .0225], [1200, 0, 0]]
   };
+  const interp = (T, col) => {
+    const t = EC3.tab;
+    if (T <= t[0][0]) return t[0][col];
+    for (let i = 1; i < t.length; i++) if (T <= t[i][0]) {
+      const f = (T - t[i - 1][0]) / (t[i][0] - t[i - 1][0]); return t[i - 1][col] + f * (t[i][col] - t[i - 1][col]);
+    }
+    return t[t.length - 1][col];
+  };
+  // Najmanje vrijednosti iznad ~1000 °C: krutost i čvrstoća ne smiju pasti na nulu (numerička stabilnost)
+  const E_MIN = 0.05, KY_MIN = 0.05;
+  const PROPS = (() => {
+    const T = [20, 100, 200, 300, 400, 500, 600, 650, 700, 750, 800, 860, 900, 1000, 1100, 1200, 1450, 1700, 3000];
+    // Vrh c na 735 °C (širok samo nekoliko stupnjeva) ruši konvergenciju toplinske analize. Između 600 i 900 °C
+    // zato se uzima srednja vrijednost c na intervalu ±50 °C: entalpija (površina ispod krivulje) ostaje ista.
+    const cAvg = t => { const D = 50, n = 400; let h = 0; for (let i = 0; i < n; i++) h += EC3.c(t - D + (i + .5) * 2 * D / n); return h / n; };
+    const o = { T, k: [], c: [], E: [], alpha: [], yieldFactor: [], src: [] };
+    T.forEach(t => {
+      const tt = Math.min(t, 1200);
+      // iznad tališta vodljivost raste kao zamjena za strujanje taline (pretpostavka, nije iz norme)
+      o.k.push(t <= 1450 ? EC3.lambda(tt) : t <= 1700 ? 70 : 90);
+      o.c.push(t >= 600 && t <= 900 ? cAvg(t) : EC3.c(tt));
+      o.E.push(210000 * Math.max(E_MIN, interp(tt, 2)));
+      const el = t <= 1200 ? EC3.elong(t) : EC3.elong(1200) + 2e-5 * (t - 1200);
+      o.alpha.push(el / (t - 20 || 1) || 1.2e-5);      // sekantni koeficijent od 20 °C (*EXPANSION, ZERO=20)
+      o.yieldFactor.push(Math.max(KY_MIN, interp(tt, 1)));
+      o.src.push(t <= 1200 ? 'EN 1993-1-2' : 'pretpostavka');
+    });
+    o.alpha[0] = 1.2e-5 + 0.8e-8 * 20;                   // derivacija u 20 °C
+    return o;
+  })();
   const RHO = 7.85e-9;          // t/mm³
   const NU = 0.3;
   const FILM = 10;              // W/(m²·K)
@@ -94,9 +128,9 @@
     const dt = Math.min(m.hx / v / 2, tWeld / 50);
     const incWeld = Math.ceil(tWeld / dt);
     const nSteps = (opts.nHeat || 40) + (opts.nCool || 25);
-    // gruba procjena trajanja (izmjereno na probnim modelima): toplinski dio ~ inkrementi × čvorovi,
-    // mehanički ~ koraci × čvorovi^1,2
-    const estMin = Math.max(1, Math.round((incWeld * 1.3 + 40) * nodes * 3.2e-5 / 60 + (nSteps + 1) * 4 * Math.pow(nodes / 1000, 1.25) * 0.12 / 60));
+    // gruba procjena trajanja, prilagođena dvama proračunima na računalu s dvije jezgre (srednja mreža 7290 čvorova:
+    // 245 s + 224 s; fina 16 884 čvorova: 1181 s + 769 s): toplinski dio ~ inkrementi · čvorovi^1,34, mehanički ~ koraci · čvorovi^1,47
+    const estMin = Math.max(1, Math.round(((incWeld * 1.3 + 40) * 6.5866e-06 * Math.pow(nodes, 1.34) + (nSteps + 1) * 0.183 * Math.pow(nodes / 1000, 1.47)) / 60));
     const baseInfo = { nodes, elems, nx, ny: NY - 1, nz, g, Qtot: Qtot / 1000, tWeld, dt, incWeld, nSteps, estMin, half, L, d };
     if (opts.infoOnly) return { info: baseInfo };
 
@@ -358,7 +392,7 @@ with open("ciklus_T.csv", "w") as fh:
 print("Zapisano: profil_sx.csv, profil_sy.csv, ciklus_T.csv (" + str(len(tocke)) + " točaka ciklusa)")
 `;
 
-  const api = { build, goldak, goldakParams, gradedY, PROPS, MESH, POST };
+  const api = { build, goldak, goldakParams, gradedY, PROPS, EC3, MESH, POST };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CCX = api;
 })(typeof window !== 'undefined' ? window : globalThis);

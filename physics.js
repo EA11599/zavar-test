@@ -260,6 +260,12 @@
 
   const RESTR = { low: .1, mid: .35, high: .7 };
 
+  // Težine uzroka: početne vrijednosti su inženjerska procjena; zamjenjuju ih težine naučene iz
+  // dnevnika zavara (fitWeights) kad ima dovoljno zapisa s nalazom ispitivanja.
+  const W0 = { hv: .65, slow: .35, pre: .55, cond: .45, hot: .4, restr: .3 };
+  const CAUSE_IDS = Object.keys(W0);
+  const riskOf = (r, w) => 100 * (1 - CAUSE_IDS.reduce((acc, id) => acc * (1 - w[id] * (r[id] || 0)), 1));
+
   function evaluate(p) {
     const T0 = Math.min(p.T0, 450);
     const Q = heatInput(p);
@@ -276,22 +282,25 @@
     const Tneed = Math.max(p.TpWPS, cet.Tp, 0);
     const Td = dewPoint(p.Ta, p.RH);
 
+    const wt = { ...W0, ...(p.weights || {}) };
     const causes = [
-      { id: 'hv', k: 'Tvrdoća ZUT-a blizu ili iznad granice (hladne pukotine)', w: .65,
+      { id: 'hv', k: 'Tvrdoća ZUT-a blizu ili iznad granice (hladne pukotine)',
         r: clamp((HV - (HVlim - 60)) / 60) },
-      { id: 'slow', k: 'Presporo hlađenje (pad žilavosti, veće deformacije)', w: .35,
+      { id: 'slow', k: 'Presporo hlađenje (pad žilavosti, veće deformacije)',
         r: en.t85 > p.tmax ? clamp((en.t85 - p.tmax) / p.tmax) : 0 },
-      { id: 'pre', k: 'Komad hladniji od potrebnog predgrijavanja', w: .55,
+      { id: 'pre', k: 'Komad hladniji od potrebnog predgrijavanja',
         r: T0 < Tneed ? clamp((Tneed - T0) / Math.max(Tneed, 40)) : 0 },
-      { id: 'cond', k: 'Moguća kondenzacija vlage na komadu (vodik)', w: .45,
+      { id: 'cond', k: 'Moguća kondenzacija vlage na komadu (vodik)',
         r: T0 < Td + 3 ? clamp((Td + 3 - T0) / 5) : 0 },
-      { id: 'hot', k: 'Komad topliji od najveće dopuštene temperature', w: .4,
+      { id: 'hot', k: 'Komad topliji od najveće dopuštene temperature',
         r: T0 > p.Tmax ? clamp((T0 - p.Tmax) / 50) : 0 },
-      { id: 'restr', k: 'Ukliještenost konstrukcije', w: .3,
+      { id: 'restr', k: 'Ukliještenost konstrukcije',
         r: RESTR[p.restr] * clamp(CE / 0.5) }
     ];
-    const risk = 100 * (1 - causes.reduce((acc, c) => acc * (1 - c.w * c.r), 1));
-    return { Q, ...en, t85model, CE, CET, HV, HVmodel, HVlim, TpCET: cet.Tp, cetWarn: cet.warn, Tneed, Td, causes, risk, k: kOf(p) };
+    causes.forEach(c => { c.w = wt[c.id]; });
+    const rs = {}; causes.forEach(c => { rs[c.id] = c.r; });
+    const risk = riskOf(rs, wt);
+    return { Q, ...en, t85model, CE, CET, HV, HVmodel, HVlim, TpCET: cet.Tp, cetWarn: cet.warn, Tneed, Td, causes, rs, risk, k: kOf(p), learnedWeights: !!p.weights };
   }
 
   /* ---------- učenje iz dnevnika zavara ---------- */
@@ -329,18 +338,61 @@
     return out;
   }
 
+  /* ---------- učenje težina indeksa rizika iz nalaza ispitivanja ---------- */
+  // rows: { r: {hv, slow, ...} ocjene uzroka 0–1, y: 1 ako je ispitivanjem nađena greška, inače 0 }.
+  // Vjerojatnost greške P = 1 − Π(1 − wᵢ·rᵢ) (isti oblik kao indeks rizika). Težine se traže metodom
+  // najveće vjerodostojnosti uz kaznu odstupanja od stručne procjene (MAP), jer je zapisa malo:
+  // uzrok koji se u podacima ne pojavljuje (rᵢ = 0 u svim zapisima) zadržava stručnu težinu.
+  function fitWeights(rows, opts = {}) {
+    const lam = opts.lambda ?? 4;                       // jačina "sidra" prema stručnoj procjeni
+    const R = rows.filter(q => q && q.r && (q.y === 0 || q.y === 1));
+    const prob = (r, w) => clamp(1 - CAUSE_IDS.reduce((acc, id) => acc * (1 - w[id] * (r[id] || 0)), 1), 1e-4, 1 - 1e-4);
+    const ll = (arr, w) => arr.reduce((s, q) => { const P = prob(q.r, w); return s + (q.y ? Math.log(P) : Math.log(1 - P)); }, 0) -
+      lam * CAUSE_IDS.reduce((s, id) => s + (w[id] - W0[id]) ** 2, 0);
+    const fit = arr => {                                 // koordinatni spust: zlatni rez po svakoj težini
+      const w = { ...W0 };
+      for (let sweep = 0; sweep < 8; sweep++) {
+        let moved = 0;
+        CAUSE_IDS.forEach(id => {
+          if (!arr.some(q => (q.r[id] || 0) > 0)) return;
+          const f = x => ll(arr, { ...w, [id]: x });
+          let lo = 0.02, hi = 0.98;
+          for (let k = 0; k < 22; k++) {
+            const m1 = hi - (hi - lo) / 1.618, m2 = lo + (hi - lo) / 1.618;
+            if (f(m1) > f(m2)) hi = m2; else lo = m1;
+          }
+          const nw = (lo + hi) / 2; moved += Math.abs(nw - w[id]); w[id] = nw;
+        });
+        if (moved < 1e-4) break;
+      }
+      return w;
+    };
+    const brier = (arr, wf) => arr.reduce((s, q, i) => s + (prob(q.r, wf(i)) - q.y) ** 2, 0) / arr.length;
+    // unakrsna validacija: "izostavi jedan" do 30 zapisa, iznad toga 10 skupina
+    const cvBrier = arr => {
+      const K = arr.length <= 30 ? arr.length : 10;
+      const ws = Array.from({ length: K }, (_, f) => fit(arr.filter((_, j) => j % K !== f)));
+      return brier(arr, i => ws[i % K]);
+    };
+    const n1 = R.filter(q => q.y === 1).length, n0 = R.length - n1;
+    const out = { n: R.length, n1, n0, w: fit(R) };
+    out.used = {}; CAUSE_IDS.forEach(id => { out.used[id] = R.some(q => (q.r[id] || 0) > 0.05); });
+    out.brierBase = R.length ? brier(R, () => W0) : NaN;
+    out.brierLoo = R.length >= 4 ? cvBrier(R) : NaN;
+    out.useful = R.length >= 6 && n1 >= 2 && n0 >= 2 && out.brierLoo < out.brierBase;
+    return out;
+  }
+
   /* ---------- kalibracija toplinske iskoristivosti iz izmjerenog ciklusa ---------- */
   // Traži k za koji Rosenthalov ciklus na udaljenosti y ima izmjereni t8/5 (t8/5 raste s k).
   function calibrateK(p, y, t85meas, T0) {
     // t8/5 se u ZUT-u malo mijenja s udaljenošću; ako modelna točka ne doseže 800 °C (Rosenthal raspoređuje toplinu
     // po debljini, pa podcjenjuje vršne temperature uz površinu), koristi se točka uz rub taline
-    let moved = false;
-    const t85At = k => {
-      const pk = { ...p, kEff: k };
-      let c = thermalCycle(pk, y, T0, Math.max(60, 4 * t85meas + 30));
-      if (!Number.isFinite(c.t85)) { moved = true; c = thermalCycle(pk, Math.max(0.3, distanceForPeak(pk, 1350, T0)), T0, Math.max(60, 4 * t85meas + 30)); }
-      return c.t85;
-    };
+    // Točka se pomiče prema osi samo koliko treba da njezin vrh dosegne 1000 °C, kontinuirano s k:
+    // inače bi t8/5 skočio pri k za koji modelna točka upravo prijeđe 800 °C.
+    const yAt = pk => Math.min(y, Math.max(0.3, distanceForPeak(pk, 1000, T0)));
+    const tEnd = Math.max(60, 4 * t85meas + 30);
+    const t85At = k => { const pk = { ...p, kEff: k }; return thermalCycle(pk, yAt(pk), T0, tEnd).t85; };
     let lo = 0.2, hi = 1.3;
     const fLo = t85At(lo), fHi = t85At(hi);
     if (!Number.isFinite(fLo) || !Number.isFinite(fHi)) return { k: NaN, reason: 'točka ne doseže 800 °C uz zadane parametre' };
@@ -350,9 +402,8 @@
       const m = (lo + hi) / 2, fm = t85At(m);
       if (!Number.isFinite(fm) || fm < t85meas) lo = m; else hi = m;
     }
-    const kf = (lo + hi) / 2;
-    moved = !Number.isFinite(thermalCycle({ ...p, kEff: kf }, y, T0, Math.max(60, 4 * t85meas + 30)).t85);
-    return { k: kf, reason: moved ? 'Model u točki mjerenja ne doseže 800 °C, pa je t8/5 uspoređen uz rub taline' : '' };
+    const kf = (lo + hi) / 2, ye = yAt({ ...p, kEff: kf });
+    return { k: kf, yEval: ye, reason: ye < y - 0.05 ? `Model u točki mjerenja ne doseže dovoljno visoku temperaturu, pa je t8/5 uspoređen ${ye.toFixed(1).replace('.', ',')} mm od osi zavara` : '' };
   }
 
   // Izmjereni ciklus: vrh i t8/5 iz niza [t, T]
@@ -418,7 +469,7 @@
   const api = { K, ULINE, HD_DEFAULT, MAT, HV_LIMIT, LAMBDA, RHOC, DIFF, T_MELT,
     heatInput, coupledVoltage, t85EN, carbonEq, preheatCET, hvMax, dewPoint,
     besselK0, rosenthal, sourceState, thermalCycle, peakTemp, distanceForPeak, peakRise, stressModels, integrate, distanceForRise, stressProfile,
-    evaluate, recommend, processWindow, variant, clamp, fitCorrections, calibrateK, cycleStats, kOf };
+    evaluate, recommend, processWindow, variant, clamp, fitCorrections, calibrateK, cycleStats, kOf, W0, CAUSE_IDS, riskOf, fitWeights };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Weld = api;

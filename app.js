@@ -38,7 +38,8 @@
       TpWPS: g('TpWPS'), tmin: g('tmin'), tmax: g('tmax'), Tmax: g('Tmax'),
       group: W.MAT[$('mat').value].group, mat: $('mat').value, comp, coupleU: $('coupleU').checked,
       kEff: KCAL.on && Number.isFinite(KCAL.k) ? KCAL.k : undefined,
-      corr: ML.use && ML.fit ? mlCorr() : undefined
+      corr: ML.use && ML.fit ? mlCorr() : undefined,
+      weights: ML.use ? mlWeights() : undefined
     };
   }
 
@@ -61,7 +62,7 @@
   let P = null, E = null, REC = null, ST = null, SM = null;
   const MC = { pts: null, name: '', stats: null };        // učitani (izmjereni ili simulirani) toplinski ciklus
   const KCAL = { k: NaN, on: false, from: '' };           // kalibrirana toplinska iskoristivost
-  const ML = { fit: null, use: false, demo: false };      // naučene korekcije iz dnevnika
+  const ML = { fit: null, fitW: null, use: false, demo: false };      // naučene korekcije iz dnevnika
   const FEM = { x: null, y: null };
   let CERT = null;   // podaci iz potvrđenog certifikata
   let probeY = 3, probeAuto = true;
@@ -107,6 +108,7 @@
     $('verdict').textContent = vt; $('verdict').style.color = col;
     $('pin').style.left = clamp(e.risk, 0, 100) + '%';
     $('tint').setAttribute('aria-label', 'Indeks rizika ' + Math.round(e.risk) + ' od 100');
+    $('riskSrc').textContent = e.learnedWeights ? `Težine uzroka naučene iz dnevnika (${ML.fitW.n} zapisa s nalazom).` : 'Težine uzroka: stručna procjena, dok se ne nauče iz nalaza u dnevniku.';
     $('mQ').textContent = fmt(e.Q, 2);
     $('mQ').nextElementSibling.textContent = KCAL.on ? `unos topline, kJ/mm (k = ${fmt(e.k, 2)}, kalibriran)` : 'unos topline, kJ/mm';
     $('mT85').textContent = fmt(e.t85, 1);
@@ -122,7 +124,7 @@
     $('ceOut').innerHTML = `CE = <b>${fmt(e.CE, 2)}</b>, CET = <b>${fmt(e.CET, 2)}</b>, skupina materijala ${p.group}` +
       (CERT && Number.isFinite(CERT.cev) ? `; CEV s certifikata = <b>${fmt(CERT.cev, 2)}</b>${Math.abs(CERT.cev - e.CE) > 0.02 ? ' (razlika od izračunatog veća od 0,02: provjeri sastav)' : ''}` : '');
     $('causes').innerHTML = e.causes.map(c => `
-      <div class="cause"><span>${c.k}</span>
+      <div class="cause"><span>${c.k} <span class="muted">(w = ${fmt(c.w, 2)})</span></span>
       <div class="bar" title="${Math.round(c.r * 100)} %"><i style="width:${Math.round(c.r * 100)}%"></i></div></div>`).join('');
   }
 
@@ -625,7 +627,7 @@
       `${i.nSteps} mehaničkih koraka. Procjena trajanja: oko <b>${i.estMin} min</b>.`;
     const w = [];
     if (P.joint !== 'butt') w.push('Generator izrađuje model sučeljenog spoja; za kutni spoj geometriju treba prilagoditi.');
-    if (i.nodes > 30000) w.push('Velik model: računanje može trajati više od sat vremena. Za prvu provjeru odaberi grubu mrežu ili kraći zavar.');
+    if (i.estMin > 10) w.push(`Procjena je dulja od 10 minuta. Za prvu provjeru ${$('ccxMesh').value !== 'gruba' ? 'odaberi grubu mrežu ili ' : ''}privremeno smanji duljinu zavara L (npr. na 200 mm) i širinu B (npr. na 120 mm): u sredini dovoljno dugog zavara uzdužna naprezanja gotovo se ne mijenjaju, a račun je nekoliko puta brži.`);
     $('ccxWarn').textContent = w.join(' ');
   }
   const ccxSave = async (which) => {
@@ -736,7 +738,7 @@
       id: uid(), ts: new Date().toISOString(), oznaka: '', zavarivac: '', napomena: '', demo: false,
       in: { mat: p.mat, Re: p.Re, d: p.d, B: p.B, L: p.L, talina: CERT ? CERT.heat || '' : '', CEVcert: CERT && Number.isFinite(CERT.cev) ? CERT.cev : '', joint: p.joint, restr: p.restr, proc: p.proc, HD: p.HD, I: p.I, U: p.U, v: p.v,
         TpWPS: p.TpWPS, T0: p.T0, Ta: p.Ta, RH: p.RH, tmin: p.tmin, tmax: p.tmax, Tmax: p.Tmax, ...p.comp },
-      pred: { Q: e.Q, t85: e.t85, HV: e.HV, t85model: e.t85model, HVmodel: e.HVmodel, k: e.k, TpCET: e.TpCET, risk: e.risk },
+      pred: { Q: e.Q, t85: e.t85, HV: e.HV, t85model: e.t85model, HVmodel: e.HVmodel, k: e.k, TpCET: e.TpCET, risk: e.risk, rs: e.rs },
       mj: { t85: '', HV: '', def: '', sig: '', greske: '' }, ...extra
     };
   }
@@ -789,6 +791,23 @@
   }
 
   /* ---------------- učenje iz dnevnika ---------------- */
+  // Ulazi zapisa kao parametri za physics.js (za ponovni izračun ocjena uzroka)
+  function pFromEntry(r) {
+    const i = r.in || {}, comp = {};
+    CHEM.forEach(k => { comp[k] = +i[k] || 0; });
+    const m = W.MAT[i.mat] || W.MAT.S355J2;
+    return { ...i, comp, group: m.group, Re: +i.Re || m.Re, HD: +i.HD || 5, B: +i.B || 300, L: +i.L || 500,
+      tmin: +i.tmin || m.tmin, tmax: +i.tmax || m.tmax, Tmax: +i.Tmax || m.Tmax,
+      kEff: Number.isFinite(+r.pred?.k) && +r.pred.k > 0 ? +r.pred.k : undefined };
+  }
+  const DEFECT = g => g === 'nema' ? 0 : (g && g !== '' ? 1 : null);
+  // Zapisi s nalazom ispitivanja (ima ili nema greške) i ocjenama uzroka za učenje težina
+  function weightRows() {
+    return LOG.filter(r => (ML.demo || !r.demo) && DEFECT(r.mj.greske) !== null).map(r => {
+      try { const p = pFromEntry(r); if (!Number.isFinite(p.T0) || !Number.isFinite(p.I)) return null; return { r: W.evaluate(p).rs, y: DEFECT(r.mj.greske) }; }
+      catch (e) { return null; }
+    }).filter(Boolean);
+  }
   function mlRows() {
     const num = v => (v === '' || v == null || !Number.isFinite(+v)) ? NaN : +v;
     return LOG.filter(r => ML.demo || !r.demo).map(r => ({ pt: num(r.pred.t85model ?? r.pred.t85), mt: num(r.mj.t85), ph: num(r.pred.HVmodel ?? r.pred.HV), mh: num(r.mj.HV) }));
@@ -800,22 +819,38 @@
     if (f.hv && f.hv.useful) c.hv = { a: f.hv.a, b: f.hv.b };
     return (c.t85 || c.hv) ? c : undefined;
   }
+  function mlWeights() { const w = ML.fitW; return w && w.useful ? w.w : undefined; }
   function renderML() {
     ML.fit = W.fitCorrections(mlRows());
-    const f = ML.fit, rows = [];
+    const wr = weightRows();
+    ML.fitW = wr.length ? W.fitWeights(wr) : null;
+    const f = ML.fit, rows = [], fw = ML.fitW;
     const cellErr = (base, loo) => Number.isFinite(loo) ? `<td class="${loo < base ? 'good' : 'bad'}">${fmt(loo, 1)}</td>` : '<td>–</td>';
     if (f.t85) rows.push(`<tr><td>t8/5</td><td>${f.t85.n}</td><td>izmjereno = ${fmt(f.t85.c, 3)} · predviđeno</td><td>${fmt(f.t85.maeBase, 1)} s</td>${cellErr(f.t85.maeBase, f.t85.maeLoo)}<td>${f.t85.useful ? 'da' : 'ne'}</td></tr>`);
     if (f.hv) rows.push(`<tr><td>Tvrdoća ZUT-a</td><td>${f.hv.n}</td><td>${f.hv.model === 'pravac' ? `HV = ${fmt(f.hv.a, 1)} + ${fmt(f.hv.b, 3)} · HVpred` : `HV = HVpred ${f.hv.a >= 0 ? '+' : '−'} ${fmt(Math.abs(f.hv.a), 1)}`}</td><td>${fmt(f.hv.maeBase, 1)} HV</td>${cellErr(f.hv.maeBase, f.hv.maeLoo)}<td>${f.hv.useful ? 'da' : 'ne'}</td></tr>`);
+    if (fw) rows.push(`<tr><td>Indeks rizika (težine uzroka)</td><td>${fw.n} (${fw.n1} s greškom)</td><td>težine u tablici ispod</td><td>${fmt(fw.brierBase, 3)}</td><td class="${fw.brierLoo < fw.brierBase ? 'good' : 'bad'}">${Number.isFinite(fw.brierLoo) ? fmt(fw.brierLoo, 3) : '–'}</td><td>${fw.useful ? 'da' : 'ne'}</td></tr>`);
     $('mlTable').innerHTML = rows.length ? `<tr><th>Veličina</th><th>Zapisa</th><th>Naučeni model</th><th>Pogreška bez korekcije</th><th>Pogreška s korekcijom (LOO)</th><th>Korisna</th></tr>${rows.join('')}` : '';
-    const corr = mlCorr();
+    renderWeights();
+    const corr = mlCorr() || mlWeights();
     $('mlUse').disabled = !corr;
     if (!corr && ML.use) { ML.use = false; $('mlUse').checked = false; }
     $('mlOut').innerHTML = !rows.length
       ? (LOG.some(r => r.demo) && !ML.demo ? 'Nema zapisa s izmjerenim vrijednostima. Upiši izmjereni t8/5 ili tvrdoću u dnevnik ili uključi primjere.' : 'Nema zapisa s izmjerenim vrijednostima. Upiši izmjereni t8/5 ili tvrdoću u tablicu iznad.')
-      : (corr ? `Korekcija smanjuje pogrešku na zapisima koji nisu korišteni za učenje.${ML.use ? ' Uključena je u procjenu na vrhu stranice.' : ''}` : 'Za korisnu korekciju treba barem 3 zapisa, a korekcija mora smanjiti pogrešku na izostavljenim zapisima.');
+      : (corr ? `Korekcija smanjuje pogrešku na zapisima koji nisu korišteni za učenje.${ML.use ? ' Uključena je u procjenu na vrhu stranice.' : ''}` : 'Za korisnu korekciju t8/5 i tvrdoće treba barem 3 zapisa, a za težine indeksa rizika barem 6 zapisa s nalazom (od toga barem 2 s greškom i 2 bez nje). Korekcija mora smanjiti pogrešku na izostavljenim zapisima.') +
+        (fw ? ' Za indeks rizika pogreška je Brierova ocjena: srednji kvadrat razlike predviđene vjerojatnosti greške i nalaza (0 ili 1); manja je bolja.' : '');
+  }
+  function renderWeights() {
+    const fw = ML.fitW, on = ML.use && !!mlWeights();
+    const lab = { hv: 'Tvrdoća ZUT-a', slow: 'Presporo hlađenje', pre: 'Hladniji od predgrijavanja', cond: 'Kondenzacija vlage', hot: 'Topliji od dopuštenog', restr: 'Ukliještenost' };
+    $('wTable').innerHTML = '<tr><th>Uzrok</th><th>Stručna procjena</th><th>Naučeno iz dnevnika</th></tr>' + W.CAUSE_IDS.map(id =>
+      `<tr><td>${lab[id]}</td><td>${fmt(W.W0[id], 2)}</td><td>${fw ? (fw.used[id] ? `<b>${fmt(fw.w[id], 2)}</b>` : '<span class="muted">nema podataka</span>') : '–'}</td></tr>`).join('');
+    $('wNote').textContent = !fw ? 'Kad u dnevnik upišeš nalaze ispitivanja (stupac "Greške"), ovdje se prikazuju težine naučene iz njih.'
+      : on ? `U procjeni se koriste težine naučene iz ${fw.n} zapisa.`
+      : fw.useful ? 'Naučene težine bolje predviđaju nalaze od stručne procjene; uključi ih kvačicom "Koristi naučenu korekciju u procjeni" u dijelu Dnevnik zavara.'
+      : `Iz ${fw.n} zapisa još se ne može pouzdano učiti; koriste se težine iz stručne procjene.`;
   }
   $('mlDemo').addEventListener('change', () => { ML.demo = $('mlDemo').checked; renderLog(); if (ML.use) render(); });
-  $('mlUse').addEventListener('change', () => { ML.use = $('mlUse').checked; render(); });
+  $('mlUse').addEventListener('change', () => { ML.use = $('mlUse').checked; render(); renderWeights(); });
 
   function renderScatter(id, key, unit) {
     // os x: predviđanje modela bez naučene korekcije (na tome se korekcija i uči)
@@ -864,8 +899,7 @@
     clearArmed = 0; $('lgClear').textContent = 'Obriši sve';
     logDelete(LOG.map(x => x.id)).then(ok => { if (ok) msg('Dnevnik je obrisan.'); });
   });
-  $('lgDemo').addEventListener('click', () => {
-    if (!P) { msg('Ispravi ulazne podatke prije dodavanja primjera.'); return; }
+  function demoEntries() {
     let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
     const add = [];
     [0, 8, 18, 30, 45, 70].forEach((T, i) => {
@@ -876,7 +910,11 @@
       r.mj.greske = T < 10 ? 'pukotine' : 'nema';
       add.push(r);
     });
-    logAdd(add).then(ok => { if (ok) msg('Dodano je 6 primjera s izmišljenim izmjerenim vrijednostima (označeni žutom crtom).'); });
+    return add;
+  }
+  $('lgDemo').addEventListener('click', () => {
+    if (!P) { msg('Ispravi ulazne podatke prije dodavanja primjera.'); return; }
+    logAdd(demoEntries()).then(ok => { if (ok) msg('Dodano je 6 primjera s izmišljenim izmjerenim vrijednostima (označeni žutom crtom).'); });
   });
 
   // CSV: razdjelnik ';', decimalni zarez, UTF-8 s BOM-om (otvara se izravno u hrvatskom Excelu)
@@ -886,7 +924,7 @@
     ['spoj', r => r.in.joint], ['uklijestenost', r => r.in.restr], ['postupak', r => r.in.proc], ['HD', r => r.in.HD],
     ['I_A', r => r.in.I], ['U_V', r => r.in.U], ['v_cm_min', r => r.in.v], ['Tp_WPS_C', r => r.in.TpWPS],
     ['T0_C', r => r.in.T0], ['Ta_C', r => r.in.Ta], ['RH_pct', r => r.in.RH], ['t85_min_s', r => r.in.tmin], ['t85_max_s', r => r.in.tmax], ['Tmax_C', r => r.in.Tmax],
-    ['Q_kJ_mm', r => r.pred.Q], ['t85_pred_s', r => r.pred.t85], ['HV_pred', r => r.pred.HV], ['Tp_CET_C', r => r.pred.TpCET], ['rizik_pred', r => r.pred.risk],
+    ['Q_kJ_mm', r => r.pred.Q], ['t85_pred_s', r => r.pred.t85], ['HV_pred', r => r.pred.HV], ['Tp_CET_C', r => r.pred.TpCET], ['rizik_pred', r => r.pred.risk], ...W.CAUSE_IDS.map(id => ['r_' + id, r => { try { return W.evaluate(pFromEntry(r)).rs[id]; } catch (e) { return ''; } }]),
     ['t85_mj_s', r => r.mj.t85], ['HV_mj', r => r.mj.HV], ['kutna_def_mj_deg', r => r.mj.def], ['sigma_mj_MPa', r => r.mj.sig], ['greske', r => r.mj.greske]
   ];
   const cell = v => {
@@ -1587,6 +1625,36 @@ Pravila:
   $('femClear').addEventListener('click', () => { FEM.x = null; FEM.y = null; $('femStatus').textContent = 'Učitani rezultati su uklonjeni.'; if (P) renderStress(); });
   ['smMM', 'smOK'].forEach(id => $(id).addEventListener('change', () => { if (P) renderStress(); }));
 
+  /* ---------------- vođeni primjer ---------------- */
+  // Ulazi za koje je izračunat priloženi primjer iz CalculiX-a (primjer-calculix/*.csv)
+  const PRIMJER = { mat: 'S355J2', d: 12, B: 120, L: 200, joint: 'butt', restr: 'mid', proc: 'MAG', HD: '5', I: 260, U: 27, v: 25, TpWPS: 50, T0: 20, Ta: 18, RH: 60 };
+  async function showExample() {
+    const st = t => { $('exMsg').textContent = t; };
+    $('exBtn').disabled = true; st('Učitavam primjer…');
+    $('mat').value = PRIMJER.mat; applyMaterial();
+    Object.entries(PRIMJER).forEach(([k, v]) => { if (k !== 'mat') $(k).value = v; });
+    KCAL.on = false; KCAL.k = NaN; probeAuto = true;
+    render();
+    const done = [];
+    const get = async f => { const r = await fetch('primjer-calculix/' + f); if (!r.ok) throw new Error(f); return r.text(); };
+    try {
+      FEM.x = parseTwoCols(await get('profil_sx.csv'));
+      FEM.y = parseTwoCols(await get('profil_sy.csv'));
+      $('femStatus').textContent = 'Učitan primjer rezultata iz CalculiX-a za ove ulaze (σx i σy).';
+      const pts = parseTwoColsTime(await get('ciklus_T.csv'));
+      Object.assign(MC, { pts, name: 'ciklus_T.csv (primjer iz CalculiX-a)', stats: W.cycleStats(pts) });
+      $('mcY').value = 4; probeY = 4; probeAuto = false;
+      $('mcStatus').textContent = 'Učitan simulirani ciklus iz CalculiX-a, 4 mm od osi zavara.';
+      done.push('rezultati CalculiX-a (naprezanja i toplinski ciklus)');
+    } catch (e) { st('Rezultati CalculiX-a nisu dostupni na ovoj adresi; ostatak primjera je učitan.'); }
+    if (!STORE.shared && !LOG.some(r => r.demo)) { await logAdd(demoEntries()); done.push('6 izmišljenih zapisa u dnevniku'); }
+    if (LOG.some(r => r.demo)) { ML.demo = true; $('mlDemo').checked = true; }
+    renderLog(); render();
+    $('exBtn').disabled = false;
+    st(`Upisani su ulazi za sučeljeni spoj S355J2, 12 mm${done.length ? '; učitani su i ' + done.join(' te ') : ''}. Prođi kroz korake 2 do 4.`);
+  }
+  $('exBtn').addEventListener('click', showExample);
+
   /* ---------------- događaji ---------------- */
   let pending = false;
   const schedule = () => { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; render(); }); };
@@ -1638,6 +1706,14 @@ Pravila:
         await dl.save({ filename: 'primjer-certifikata.pdf', data: blob });
       } catch (e) { if (e && e.code !== 'declined') cstat('Primjer certifikata nije spremljen.'); }
     });
+  }
+  // Koja je verzija otvorena: u Claude artefaktu certifikat čita Claude, a dnevnik je zajednički
+  const ARTEFAKT = 'https://claude.ai/artifact/8PoWP6bv6DsQC6ZmSix36p';
+  const GITHUB = 'https://ea11599.github.io/zavar-test/';
+  if (window.claude && typeof window.claude.use === 'function') {
+    $('verNote').innerHTML = `Ova verzija radi unutar Claudea: certifikate (i fotografije) čita Claude, a dnevnik zavara zajednički je svima kojima je stranica podijeljena. Javna verzija bez prijave: <a href="${GITHUB}" target="_blank" rel="noopener">GitHub Pages</a>.`;
+  } else {
+    $('verNote').innerHTML = `Ovo je javna verzija: certifikate čita prepoznavanje teksta (OCR) u pregledniku, a dnevnik ostaje na ovom računalu (razmjena preko CSV-a). U <a href="${ARTEFAKT}" target="_blank" rel="noopener">verziji unutar Claudea</a> certifikate čita Claude, što je pouzdanije za fotografije i skenove, a dnevnik je zajednički. Ta se verzija otvara uz Claude račun kojem je podijeljena.`;
   }
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { fieldStateDirty = true; if (P) render(); });
 

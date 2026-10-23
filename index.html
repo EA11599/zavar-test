@@ -18,7 +18,7 @@
     <p>Upiši stvarne uvjete na radnom mjestu i parametre iz WPS-a. Program računa toplinski ciklus, tvrdoću ZUT-a, potrebno predgrijavanje i raspodjelu zaostalih naprezanja, procjenjuje rizik i predlaže korekciju parametara.</p>
   </div>
   <div class="head-actions">
-    <div class="stamp">Demo verzija 4</div>
+    <div class="stamp">Demo verzija 5</div>
     <div class="row">
       <button type="button" class="toggle-notes" id="toggleNotes" aria-pressed="false">Prikaži sve napomene</button>
       <button type="button" class="ghost" id="printBtn">Ispiši izvještaj</button>
@@ -34,7 +34,26 @@
   <a href="#usporedba">Sunce i sjena</a>
   <a href="#dnevnik">Dnevnik zavara</a>
   <a href="#plan">Plan razvoja</a>
+  <a href="#izvori">Izvori</a>
 </nav>
+
+<!-- ============ UVOD ============ -->
+<section class="intro" aria-labelledby="introH">
+  <div class="intro-head">
+    <h2 id="introH">Kako se koristi</h2>
+    <div class="row noprint">
+      <button type="button" id="exBtn">Prikaži primjer</button>
+    </div>
+  </div>
+  <ol class="guide">
+    <li><b>Upiši uvjete</b><span>Izmjerenu temperaturu komada, vlagu, materijal (ili učitaj certifikat) i parametre iz WPS-a. <a href="#procjena">Ulazni podaci</a></span></li>
+    <li><b>Pogledaj procjenu</b><span>t8/5, tvrdoću ZUT-a, potrebno predgrijavanje, indeks rizika i preporuku za zavarivača. <a href="#procjena">Procjena</a></span></li>
+    <li><b>Usporedi s MKE</b><span>Analitičke modele naprezanja i Rosenthalov ciklus s rezultatima iz CalculiX-a. <a href="#naprezanja">Modeli naprezanja</a></span></li>
+    <li><b>Upiši mjerenja</b><span>Nakon ispitivanja: t8/5, tvrdoću i nađene greške. Program iz njih uči korekcije i težine rizika. <a href="#dnevnik">Dnevnik zavara</a></span></li>
+  </ol>
+  <p class="hint" id="exMsg" role="status">"Prikaži primjer" upisuje ulaze za koje je priložen stvarni proračun u CalculiX-u, učitava njegove rezultate i dodaje izmišljene zapise u dnevnik, pa se svi dijelovi stranice odmah vide ispunjeni.</p>
+  <p class="hint" id="verNote"></p>
+</section>
 
 <!-- ============ ULAZI I PROCJENA ============ -->
 <div class="grid" id="procjena">
@@ -167,6 +186,7 @@
         <div class="score"><span class="num" id="risk">–</span><span class="verdict" id="verdict">–</span></div>
         <div class="tint" role="img" id="tint" aria-label="Indeks rizika"><div class="pin" id="pin" style="left:0"></div></div>
         <div class="tint-scale"><span>nizak rizik</span><span>skala u bojama popuštanja čelika</span><span>visok rizik</span></div>
+        <p class="hint" id="riskSrc"></p>
       </div>
       <div class="metrics">
         <div class="metric"><b id="mQ">–</b><span>unos topline, kJ/mm</span></div>
@@ -178,31 +198,33 @@
       </div>
       <p class="warnline" id="cetWarn" style="padding:0 18px"></p>
       <details class="how"><summary>Kako se računaju ove vrijednosti</summary>
-        <p><b>Unos topline</b> (k = 0,8 za MAG i REL, 0,6 za TIG; v u mm/s):</p>
+        <p><b>Unos topline</b> (k = 0,8 za MAG i REL, 0,6 za TIG prema EN 1011-1 [2]; v u mm/s):</p>
         <div class="f">Q = k · U · I / v · 10⁻³ &nbsp;[kJ/mm]</div>
-        <p><b>Vrijeme hlađenja t8/5</b> prema EN 1011-2, uz faktor oblika F (0,9 sučeljeni, 0,67 T-spoj):</p>
+        <p><b>Vrijeme hlađenja t8/5</b> prema EN 1011-2 [1], dodatak D, uz faktor oblika F (0,9 sučeljeni, 0,67 T-spoj):</p>
         <div class="f">3D: t8/5 = (6700 − 5T₀) · Q · [1/(500 − T₀) − 1/(800 − T₀)] · F₃</div>
         <div class="f">2D: t8/5 = (4300 − 4,3T₀) · 10⁵ · (Q²/d²) · [(1/(500 − T₀))² − (1/(800 − T₀))²] · F₂</div>
         <p>Koji izraz vrijedi, određuje prijelazna debljina d<sub>t</sub>: za d &lt; d<sub>t</sub> toplina se odvodi dvodimenzionalno, inače trodimenzionalno.</p>
-        <p><b>Najveća tvrdoća ZUT-a</b> računa se iz sastava i t8/5 modelom Yurioke i sur., a uspoređuje se s granicom iz EN ISO 15614-1 za skupinu materijala (380 HV10 za skupine 1 i 2, 450 HV10 za skupinu 3, bez toplinske obrade).</p>
-        <p><b>Potrebno predgrijavanje</b> prema EN 1011-2, metoda B:</p>
+        <p><b>Najveća tvrdoća ZUT-a</b> računa se iz sastava i t8/5 modelom Yurioke i sur. [10], a uspoređuje se s granicom iz EN ISO 15614-1 [3] za skupinu materijala (380 HV10 za skupine 1 i 2, 450 HV10 za skupinu 3, bez toplinske obrade).</p>
+        <p><b>Potrebno predgrijavanje</b> prema EN 1011-2 [1], dodatak C, metoda B:</p>
         <div class="f">T<sub>p</sub> = 697·CET + 160·tanh(d/35) + 62·HD<sup>0,35</sup> + (53·CET − 32)·Q − 328</div>
         <p>Izraz vrijedi za CET 0,20–0,50, d 10–90 mm, HD 1–20 ml/100 g i Q 0,5–4,0 kJ/mm; izvan toga program ispisuje upozorenje. Za provjeru komada koristi se veća od propisane i izračunate vrijednosti.</p>
-        <p><b>Rosište</b> se računa Magnusovom formulom; ako je komad hladniji od rosišta + 3 °C, postoji rizik kondenzacije i unosa vodika.</p>
+        <p><b>Rosište</b> se računa Magnusovom formulom s koeficijentima iz WMO-No. 8 [13]; ako je komad hladniji od rosišta + 3 °C, postoji rizik kondenzacije i unosa vodika.</p>
       </details>
       <div class="causes" id="causes"></div>
       <details class="how"><summary>Kako nastaje indeks rizika</summary>
         <p>Svaki uzrok dobiva ocjenu od 0 do 1 (stupci iznad) i težinu. Indeks je vjerojatnost da se ostvari barem jedan nepovoljan uzrok:</p>
         <div class="f">R = 100 · [1 − Π (1 − wᵢ · rᵢ)]</div>
         <ul>
-          <li>Tvrdoća ZUT-a: raste od 60 HV ispod granice do granice (w = 0,65).</li>
-          <li>Presporo hlađenje: t8/5 iznad ciljanog raspona (w = 0,35).</li>
-          <li>Komad hladniji od potrebnog predgrijavanja (w = 0,55).</li>
-          <li>Moguća kondenzacija vlage (w = 0,45).</li>
-          <li>Komad topliji od najveće dopuštene temperature (w = 0,4).</li>
-          <li>Ukliještenost, pojačana višim CE (w = 0,3).</li>
+          <li>Tvrdoća ZUT-a: raste od 60 HV ispod granice do granice (početno w = 0,65).</li>
+          <li>Presporo hlađenje: t8/5 iznad ciljanog raspona (početno w = 0,35).</li>
+          <li>Komad hladniji od potrebnog predgrijavanja (početno w = 0,55).</li>
+          <li>Moguća kondenzacija vlage (početno w = 0,45).</li>
+          <li>Komad topliji od najveće dopuštene temperature (početno w = 0,4).</li>
+          <li>Ukliještenost, pojačana višim CE (početno w = 0,3).</li>
         </ul>
-        <p>Težine su postavljene inženjerskom procjenom i služe za prikaz. U kasnijoj fazi zamjenjuje ih model naučen na rezultatima pokusa i simulacija.</p>
+        <p>Oblik izraza i ocjene uzroka slijede iz norme i modela navedenih gore, ali su <b>početne težine inženjerska procjena</b>, a ne izmjerene vrijednosti. Zato ih program uči iz podataka: svaki zapis u dnevniku zavara s upisanim nalazom ispitivanja (ima ili nema greške) jedan je primjer. Indeks se tada tumači kao vjerojatnost greške, a težine se traže metodom najveće vjerodostojnosti, uz blagu kaznu za odstupanje od početne procjene jer je zapisa malo. Naučene težine koriste se tek kad na zapisima izostavljenima iz učenja predviđaju nalaze bolje od početnih (Brierova ocjena [16]).</p>
+        <div class="tablewrap"><table class="t" id="wTable"></table></div>
+        <p class="note" id="wNote"></p>
       </details>
     </div>
 
@@ -255,7 +277,7 @@
     <p>Polje je analitičko Rosenthalovo rješenje za pomični izvor topline u kvazistacionarnom stanju, gdje je ξ udaljenost od izvora uzduž zavara, a λ i a toplinska vodljivost i difuzivnost:</p>
     <div class="f">debela ploča (3D): T = T₀ + q / (2πλR) · exp[−v(ξ + R) / 2a], &nbsp; R = √(ξ² + y² + z²)</div>
     <div class="f">tanka ploča (2D): T = T₀ + q / (2πλd) · exp(−vξ / 2a) · K₀(v r / 2a), &nbsp; r = √(ξ² + y²)</div>
-    <p>Svojstva čelika odabrana su tako da se Rosenthalovo rješenje pri T₀ = 0 °C točno poklapa s koeficijentima izraza iz EN 1011-2, što provjeravaju testovi programa. Zato se t8/5 očitan s krivulje i onaj iz norme razlikuju samo zbog faktora oblika spoja i empirijske ovisnosti o T₀ u normi.</p>
+    <p>Rosenthalovo rješenje [8]; K₀ je modificirana Besselova funkcija, računa se polinomnim aproksimacijama [14]. Svojstva čelika odabrana su tako da se Rosenthalovo rješenje pri T₀ = 0 °C točno poklapa s koeficijentima izraza iz EN 1011-2, što provjeravaju testovi programa. Zato se t8/5 očitan s krivulje i onaj iz norme razlikuju samo zbog faktora oblika spoja i empirijske ovisnosti o T₀ u normi.</p>
     <p>Ograničenja: točkasti ili linijski izvor bez raspodjele, svojstva neovisna o temperaturi, bez latentne topline taljenja. Zbog toga je talina u modelu uža, a temperature uz sam izvor nerealno visoke. Upravo ta ograničenja uklanja MKE simulacija u CalculiX-u s Goldakovim izvorom.</p>
   </details>
 </section>
@@ -281,7 +303,7 @@
       <p class="hint" style="margin:4px 0 8px">Iz trenutnih ulaza izrađuje ulazne datoteke za MKE analizu sučeljenog spoja: toplinsku (pomični Goldakov izvor) i mehaničku (zaostala naprezanja).</p>
       <div class="fields">
         <label>Gustoća mreže
-          <select id="ccxMesh"><option value="gruba">Gruba (brza provjera)</option><option value="srednja" selected>Srednja</option><option value="fina">Fina</option></select>
+          <select id="ccxMesh"><option value="gruba" selected>Gruba (brza provjera)</option><option value="srednja">Srednja</option><option value="fina">Fina</option></select>
         </label>
         <label>Trajanje hlađenja, s<input type="number" id="ccxCool" value="3000" min="200" step="100"></label>
       </div>
@@ -299,7 +321,9 @@
         <div class="f">ccx -i naprezanja</div>
         <div class="f">python izvuci_rezultate.py</div>
         <p>Prva analiza računa temperaturno polje dok Goldakov izvor prolazi duž zavara i tijekom hlađenja. Druga je mehanička: u svakom koraku učitava temperature iz <code>toplina.frd</code> i računa elastoplastične deformacije, a na kraju ploču ohladi na temperaturu okoline. Skripta zatim izdvaja tri CSV datoteke: <code>profil_sx.csv</code> i <code>profil_sy.csv</code> učitaju se ovdje ispod, kao rezultati iz CalculiX-a, a <code>ciklus_T.csv</code> u dijelu s toplinskim ciklusom, za usporedbu s Rosenthalovim rješenjem.</p>
-        <p>Model je polovica ploče (simetrija u ravnini zavara) s heksaedarskim elementima. Pomični izvor zadan je bez korisničkih potprograma: svaki element u zoni izvora dobiva vlastitu krivulju toplinskog toka u vremenu, uzorkovanu iz Goldakove raspodjele, a ukupna snaga normira se na k·U·I. Svojstva materijala ovisna o temperaturi su orijentacijske literaturne vrijednosti za konstrukcijski čelik i za rad ih treba zamijeniti podacima za stvarni materijal. Generator izrađuje model sučeljenog spoja.</p>
+        <p>Model je polovica ploče (simetrija u ravnini zavara) s heksaedarskim elementima. Pomični izvor zadan je bez korisničkih potprograma: svaki element u zoni izvora dobiva vlastitu krivulju toplinskog toka u vremenu, uzorkovanu iz Goldakove raspodjele, a ukupna snaga normira se na k·U·I. Generator izrađuje model sučeljenog spoja.</p>
+        <p><b>Svojstva materijala</b> ovisna o temperaturi računaju se izrazima iz EN 1993-1-2 [7] za ugljični čelik: toplinska vodljivost, specifični toplinski kapacitet (s vrhom na 735 °C), toplinsko produljenje te faktori smanjenja granice tečenja k<sub>y</sub> i modula elastičnosti k<sub>E</sub>, pomnoženi s upisanim Re. Norma vrijedi do 1200 °C. Iznad toga, kao i najmanja krutost i čvrstoća (5 %) te očvršćenje od 10 %, vrijednosti su numeričke pretpostavke. Faktor k<sub>y</sub> u normi odgovara deformaciji od 2 % (proračun na požar), pa za zavarivanje daje nešto višu granicu tečenja između 200 i 400 °C od vrijednosti za 0,2 %.</p>
+        <p>Preporuka za prvi proračun je gruba mreža i kraći zavar (npr. L = 200 mm, B = 120 mm), što na običnom računalu traje nekoliko minuta. Procjena trajanja izmjerena je na računalu s dvije jezgre.</p>
       </details>
     </div>
     <div class="fem noprint">
@@ -312,10 +336,10 @@
       <p class="hint" id="femStatus" role="status">Dva stupca: udaljenost u mm i naprezanje u MPa. Razdjelnik može biti točka-zarez, zarez, tabulator ili razmak.</p>
     </div>
     <details class="how"><summary>Kako se računaju modeli</summary>
-      <p><b>Masubuchi i Martin.</b> Oblik raspodjele je samouravnotežen po širini ploče:</p>
+      <p><b>Masubuchi i Martin</b> [11]. Oblik raspodjele je samouravnotežen po širini ploče:</p>
       <div class="f">σₓ(y) = σₘ · [1 − (y/b)²] · exp[−½ (y/b)²]</div>
       <p>Najveće naprezanje σₘ uzima se jednako granici tečenja. Poluširina vlačne zone b određuje se iz Rosenthalovog polja kao udaljenost na kojoj vršni porast temperature dostiže 2·Re/(E·α), tj. dvostruku elastičnu toplinsku deformaciju (pojednostavljeni kriterij plastifikacije).</p>
-      <p><b>Okerblom.</b> Vlačna zona ima naprezanje jednako granici tečenja, a njezina širina slijedi iz uvjeta da vršni porast temperature (Rosenthal, 2D) doseže Re/(E·α):</p>
+      <p><b>Okerblom</b> [12]. Vlačna zona ima naprezanje jednako granici tečenja, a njezina širina slijedi iz uvjeta da vršni porast temperature (Rosenthal, 2D) doseže Re/(E·α):</p>
       <div class="f">2b = 0,484 · q / (v · d · cρ · ΔT<sub>y</sub>), &nbsp; ΔT<sub>y</sub> = Re / (E·α)</div>
       <p>Tlak je jednoliko raspodijeljen po ostatku širine ploča B, tako da je neto sila nula. Uzdužna sila skupljanja jednaka je F = Re · 2b · d. Model je izveden za tanke ploče; za 3D odvođenje topline program ispisuje upozorenje.</p>
       <p><b>Poprečna naprezanja duž zavara.</b> Kod slobodnih ploča poprečna naprezanja su vlačna u sredini zavara, a tlačna na krajevima, uz neto silu nula. Program koristi oblik σ<sub>y</sub> = σ<sub>A</sub>·(1 − 3ξ²), ξ = 2x/L − 1, uz σ<sub>A</sub> = 0,2·Re. Ukliještenost dodaje jednoliko reaktivno naprezanje (0; 0,25 ili 0,5·Re za malu, srednju i veliku ukliještenost). Amplitude su pretpostavke koje treba kalibrirati MKE simulacijom i mjerenjima.</p>
@@ -380,7 +404,7 @@
 <!-- ============ DNEVNIK ============ -->
 <section class="block" id="dnevnik">
   <h2>Dnevnik zavara</h2>
-  <p class="lead">Spremi trenutni zavar s ulazima i izračunima, a nakon ispitivanja upiši izmjerene rezultate. <span id="lgStore">Podaci ostaju u ovom pregledniku i mogu se izvesti u CSV za daljnju obradu.</span></p>
+  <p class="lead">Spremi trenutni zavar s ulazima i izračunima, a nakon ispitivanja upiši izmjerene rezultate. <span id="lgStore">Podaci ostaju u ovom pregledniku. Za razmjenu s drugima izvezi CSV i pošalji ga; uvozom se zapisi dodaju u dnevnik primatelja.</span></p>
   <div class="sheet">
     <div style="padding:14px 18px" class="noprint">
       <div class="fields">
@@ -417,6 +441,7 @@
       <ul>
         <li><b>t8/5:</b> izmjereno = c · predviđeno. Faktor c obuhvaća sve što norma ne vidi: stvarnu toplinsku iskoristivost, geometriju spoja, položaj termopara.</li>
         <li><b>Tvrdoća ZUT-a:</b> pomak (HV + a) ili pravac (a + b·HV). Pravac se uzima tek od 5 zapisa i samo ako daje manju pogrešku.</li>
+        <li><b>Težine indeksa rizika:</b> iz stupca "Greške" (nema ili ima greške). Treba barem 6 takvih zapisa, od toga barem 2 s greškom i 2 bez nje. Naučene težine prikazane su u napomeni "Kako nastaje indeks rizika".</li>
       </ul>
       <p>Točnost se provjerava unakrsnom validacijom "izostavi jedan": model se nauči bez jednog zapisa i provjeri na njemu, za svaki zapis redom. Korekcija se smije uključiti samo ako je ta pogreška manja od pogreške modela bez korekcije. To je namjerno jednostavan, provjerljiv početak; kad bude više podataka, isti izvezeni CSV može se upotrijebiti za složenije modele (npr. random forest ili neuronsku mrežu) u Pythonu.</p>
       <p>Primjeri u dnevniku izrađeni su sa sustavnim odstupanjem (tvrdoća oko 12 HV viša, t8/5 oko 8 % dulji), pa uz uključene primjere model to odstupanje treba pronaći.</p>
@@ -453,8 +478,51 @@
   </ol>
 </section>
 
+<!-- ============ IZVORI ============ -->
+<section class="block" id="izvori">
+  <h2>Izvori i pretpostavke</h2>
+  <p class="lead">Odakle je koji izraz i koeficijent, te što je u ovoj verziji pretpostavka koju tek treba potvrditi mjerenjima. Brojevi u uglatim zagradama u napomenama odnose se na ovaj popis.</p>
+  <div class="grid2">
+    <div class="sheet">
+      <h3 class="sh">Literatura i norme</h3>
+      <ol class="refs">
+        <li>EN 1011-2:2001 Zavarivanje – Preporuke za zavarivanje metalnih materijala – 2. dio: Elektrolučno zavarivanje feritnih čelika. Dodatak C (predgrijavanje, metoda B, CET), dodatak D (t8/5, prijelazna debljina, faktori oblika).</li>
+        <li>EN 1011-1:2009 Zavarivanje – Preporuke za zavarivanje metalnih materijala – 1. dio: Opće smjernice za elektrolučno zavarivanje. Toplinska iskoristivost k.</li>
+        <li>EN ISO 15614-1:2017 Specifikacija i kvalifikacija postupaka zavarivanja – Ispitivanje postupka zavarivanja – 1. dio. Najveća tvrdoća HV10 po skupinama materijala, granice unosa topline.</li>
+        <li>EN 60974-1 Oprema za elektrolučno zavarivanje – 1. dio: Izvori struje za zavarivanje. Konvencionalni radni napon.</li>
+        <li>EN ISO 13916:2017 Zavarivanje – Mjerenje temperature predgrijavanja, međuslojne temperature i temperature održavanja.</li>
+        <li>EN 10204:2004 Metalni proizvodi – Vrste dokumenata o ispitivanju (certifikat 3.1).</li>
+        <li>EN 1993-1-2:2005 Eurokod 3: Projektiranje čeličnih konstrukcija – Dio 1-2: Proračun konstrukcija na djelovanje požara. Točke 3.2 i 3.4: svojstva ugljičnog čelika ovisna o temperaturi.</li>
+        <li>D. Rosenthal: The theory of moving sources of heat and its application to metal treatments. Transactions of the ASME 68 (1946), 849–866.</li>
+        <li>J. Goldak, A. Chakravarti, M. Bibby: A new finite element model for welding heat sources. Metallurgical Transactions B 15 (1984), 299–305.</li>
+        <li>N. Yurioka, M. Okumura, T. Kasuya, H. J. U. Cotton: Prediction of HAZ hardness of transformable steels. Metal Construction 19 (1987), 217R–223R.</li>
+        <li>K. Masubuchi, D. C. Martin: Investigation of residual stresses by use of hydrogen cracking. Welding Journal 40 (1961), 553s–563s; K. Masubuchi: Analysis of Welded Structures. Pergamon Press, Oxford 1980.</li>
+        <li>N. O. Okerblom: The Calculations of Deformations of Welded Metal Structures. HMSO, London 1958 (prijevod s ruskog).</li>
+        <li>WMO: Guide to Instruments and Methods of Observation (WMO-No. 8), dodatak o vlažnosti zraka: Magnusov izraz za tlak zasićene pare iznad vode.</li>
+        <li>M. Abramowitz, I. A. Stegun: Handbook of Mathematical Functions. NBS, Washington 1964, izrazi 9.8.5 i 9.8.6.</li>
+        <li>G. Dhondt: CalculiX CrunchiX User's Manual, verzija 2.21.</li>
+        <li>G. W. Brier: Verification of forecasts expressed in terms of probability. Monthly Weather Review 78 (1950), 1–3.</li>
+      </ol>
+    </div>
+    <div class="sheet">
+      <h3 class="sh">Što je pretpostavka</h3>
+      <div class="tablewrap" style="padding:0 18px 14px"><table class="t assume">
+        <tr><th>Veličina</th><th>Trenutna vrijednost</th><th>Kako se zamjenjuje</th></tr>
+        <tr><td>Težine uzroka u indeksu rizika</td><td>0,30–0,65, stručna procjena</td><td>Učenje iz nalaza u dnevniku (radi)</td></tr>
+        <tr><td>Ocjena uzroka (rampe, npr. 60 HV ispod granice, rosište + 3 °C)</td><td>Stručna procjena</td><td>Pokusi s namjerno lošim uvjetima</td></tr>
+        <tr><td>Ciljani t8/5 i najveća temperatura komada</td><td>Orijentacijske vrijednosti po materijalu</td><td>Tehnički list proizvođača čelika</td></tr>
+        <tr><td>Sastav i Re odabranog materijala</td><td>Tipične vrijednosti</td><td>Certifikat 3.1 [6] (učitavanje radi)</td></tr>
+        <tr><td>Poluširina vlačne zone (kriterij 2·Re/(E·α))</td><td>Pojednostavljeni kriterij plastifikacije</td><td>CalculiX: u primjeru σx pada gotovo na nulu na 11–14 mm od osi (Masubuchi i Martin: 12,3 mm), ali do oko 30 mm ostaje blagi drugi vlačni vrh koji analitički modeli nemaju; isti je i na finoj mreži</td></tr>
+        <tr><td>Poprečna naprezanja: 0,2·Re i reakcija ukliještenosti</td><td>Pretpostavljene amplitude</td><td>CalculiX i mjerenja</td></tr>
+        <tr><td>Svojstva čelika iznad 1200 °C, donje granice krutosti i čvrstoće, očvršćenje</td><td>Numeričke pretpostavke</td><td>Ispitivanja stvarnog materijala na povišenim temperaturama ili literatura</td></tr>
+        <tr><td>Goldakovi parametri izvora</td><td>Iz širine taline po Rosenthalu, povećani na veličinu elemenata</td><td>Makroizbrusak zavara</td></tr>
+      </table></div>
+    </div>
+  </div>
+</section>
+
 <footer>
-  Demo prototip za diplomski rad. Izrazi iz EN 1011-2, EN ISO 15614-1 i EN 60974-1 primijenjeni su u pojednostavljenom obliku; procjena rizika i raspodjela zaostalih naprezanja su orijentacijske i nisu zamjena za WPS ni za ispitivanje.
+  Demo prototip za diplomski rad. Izrazi iz normi i literature navedenih u dijelu "Izvori" primijenjeni su u pojednostavljenom obliku; procjena rizika i raspodjela zaostalih naprezanja su orijentacijske i nisu zamjena za WPS ni za ispitivanje.
 </footer>
 </div>
 

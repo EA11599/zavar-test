@@ -15,9 +15,15 @@ Stranica: https://ea11599.github.io/zavar-demo/
 - čitanje certifikata materijala (EN 10204 3.1) iz PDF-a ili fotografije: sastav, CEV, oznaka čelika, talina, ReH
 - procesni prozor: kartu rizika u ravnini struja–brzina
 - indeks rizika i preporuku parametara unutar ±25 % unosa topline
-- dnevnik zavara s unosom izmjerenih rezultata, izvozom i uvozom CSV-a
+- dnevnik zavara s unosom izmjerenih rezultata, izvozom i uvozom CSV-a; u Claude artefaktu dnevnik je zajednički
+- učitavanje izmjerenog (termopar) ili simuliranog toplinskog ciklusa i kalibraciju toplinske iskoristivosti k
+- učenje korekcija t8/5 i tvrdoće ZUT-a iz dnevnika, s unakrsnom validacijom "izostavi jedan"
+- učenje težina indeksa rizika iz nalaza ispitivanja upisanih u dnevnik (najveća vjerodostojnost uz sidro na stručnoj procjeni, provjera Brierovom ocjenom)
+- vođeni primjer ("Prikaži primjer") koji učitava stvarni proračun iz CalculiX-a i primjere u dnevniku
+- popis izvora za sve izraze i tablicu pretpostavki koje tek treba potvrditi
+- generator ulaznih datoteka za CalculiX (toplinska i mehanička analiza sučeljenog spoja, Goldakov izvor, svojstva čelika prema EN 1993-1-2) i Python skriptu koja rezultate izdvaja u CSV za uvoz u aplikaciju
 
-Indeks rizika i raspodjela naprezanja su pojednostavljeni modeli za prikaz ideje; u sljedećim fazama zamjenjuju ih MKE simulacije (CalculiX) i model treniran na eksperimentalnim podacima.
+Početne težine indeksa rizika i amplitude poprečnih naprezanja su pretpostavke (popisane na stranici u dijelu "Izvori i pretpostavke"); zamjenjuju ih podaci iz pokusa i MKE simulacija.
 
 ## Datoteke
 
@@ -28,9 +34,13 @@ Indeks rizika i raspodjela naprezanja su pojednostavljeni modeli za prikaz ideje
 | `physics.js` | svi izračuni, bez ovisnosti o sučelju |
 | `app.js` | sučelje, grafikoni, animacija, dnevnik, certifikat |
 | `cert.js` | prepoznavanje sastava i CEV-a u certifikatu |
+| `calculix.js` | generator ulaznih datoteka za CalculiX i skripta za rezultate |
 | `primjer-certifikata.pdf` | izmišljeni certifikat za isprobavanje |
+| `primjer-calculix/` | rezultati stvarnog proračuna u CalculiX-u za vođeni primjer (S355J2, 12 mm, B = 120 mm, L = 200 mm, srednja mreža) |
 | `tests/physics.test.js` | automatski testovi izračuna |
 | `tests/cert.test.js` | automatski testovi čitanja certifikata |
+| `tests/calculix.test.js` | automatski testovi generatora za CalculiX |
+| `tests/podaci/` | stvarno očitanje certifikata za test |
 
 ## Pokretanje i testovi
 
@@ -39,7 +49,7 @@ Stranica radi bez instalacije: otvori `index.html` u pregledniku (sve datoteke m
 Testovi izračuna (potreban Node.js 18 ili noviji):
 
 ```
-node --test tests/physics.test.js tests/cert.test.js
+node --test tests/physics.test.js tests/cert.test.js tests/calculix.test.js
 ```
 
 Testovi provjeravaju, između ostalog, da se Rosenthalovo rješenje poklapa s izrazima za t8/5 iz EN 1011-2.
