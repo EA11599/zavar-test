@@ -19,6 +19,7 @@ Stranica: https://ea11599.github.io/zavar-demo/
 - učitavanje izmjerenog (termopar) ili simuliranog toplinskog ciklusa i kalibraciju toplinske iskoristivosti k
 - učenje korekcija t8/5 i tvrdoće ZUT-a iz dnevnika, s unakrsnom validacijom "izostavi jedan"
 - učenje težina indeksa rizika iz nalaza ispitivanja upisanih u dnevnik (najveća vjerodostojnost uz sidro na stručnoj procjeni, provjera Brierovom ocjenom)
+- hibridni surogatni model zaostalih naprezanja: analitički model + Gaussova procesna regresija naučena na 36 proračuna u CalculiX-u, s 95 % intervalom i upozorenjem izvan raspona
 - vođeni primjer ("Prikaži primjer") koji učitava stvarni proračun iz CalculiX-a i primjere u dnevniku
 - popis izvora za sve izraze i tablicu pretpostavki koje tek treba potvrditi
 - generator ulaznih datoteka za CalculiX (toplinska i mehanička analiza sučeljenog spoja, Goldakov izvor, svojstva čelika prema EN 1993-1-2) i Python skriptu koja rezultate izdvaja u CSV za uvoz u aplikaciju
@@ -34,6 +35,8 @@ Početne težine indeksa rizika i amplitude poprečnih naprezanja su pretpostavk
 | `physics.js` | svi izračuni, bez ovisnosti o sučelju |
 | `app.js` | sučelje, grafikoni, animacija, dnevnik, certifikat |
 | `cert.js` | prepoznavanje sastava i CEV-a u certifikatu |
+| `surrogate.js` | Gaussova procesna regresija i hibridni surogatni model |
+| `surogat-podaci.js` | rezultati 36 proračuna u CalculiX-u i naučeni hiperparametri |
 | `calculix.js` | generator ulaznih datoteka za CalculiX i skripta za rezultate |
 | `primjer-certifikata.pdf` | izmišljeni certifikat za isprobavanje |
 | `primjer-calculix/` | rezultati stvarnog proračuna u CalculiX-u za vođeni primjer (S355J2, 12 mm, B = 120 mm, L = 200 mm, srednja mreža) |
@@ -49,7 +52,7 @@ Stranica radi bez instalacije: otvori `index.html` u pregledniku (sve datoteke m
 Testovi izračuna (potreban Node.js 18 ili noviji):
 
 ```
-node --test tests/physics.test.js tests/cert.test.js tests/calculix.test.js
+node --test tests/physics.test.js tests/cert.test.js tests/calculix.test.js tests/surrogate.test.js
 ```
 
 Testovi provjeravaju, između ostalog, da se Rosenthalovo rješenje poklapa s izrazima za t8/5 iz EN 1011-2.

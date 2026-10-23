@@ -128,9 +128,9 @@
     const dt = Math.min(m.hx / v / 2, tWeld / 50);
     const incWeld = Math.ceil(tWeld / dt);
     const nSteps = (opts.nHeat || 40) + (opts.nCool || 25);
-    // gruba procjena trajanja, prilagođena dvama proračunima na računalu s dvije jezgre (srednja mreža 7290 čvorova:
-    // 245 s + 224 s; fina 16 884 čvorova: 1181 s + 769 s): toplinski dio ~ inkrementi · čvorovi^1,34, mehanički ~ koraci · čvorovi^1,47
-    const estMin = Math.max(1, Math.round(((incWeld * 1.3 + 40) * 6.5866e-06 * Math.pow(nodes, 1.34) + (nSteps + 1) * 0.183 * Math.pow(nodes / 1000, 1.47)) / 60));
+    // procjena trajanja (oba dijela), prilagođena na 37 proračuna ovim generatorom na računalu s dvije jezgre
+    // (po dva proračuna istodobno): t ≈ 8,0·10⁻⁴ · čvorovi^1,567 s, rasipanje oko ±9 %
+    const estMin = Math.max(1, Math.round(8.0e-4 * Math.pow(nodes, 1.567) / 60));
     const baseInfo = { nodes, elems, nx, ny: NY - 1, nz, g, Qtot: Qtot / 1000, tWeld, dt, incWeld, nSteps, estMin, half, L, d };
     if (opts.infoOnly) return { info: baseInfo };
 
@@ -208,7 +208,7 @@
       if (t2 < tWeld) pts.push([t2 + 1e-3, 0]);
       if (qmax * e.vol < 1e-5 * Qhalf) return;                      // zanemariv doprinos
       const name = 'Q' + e.id;
-      ampLines.push(`*AMPLITUDE, NAME=${name}`);
+      ampLines.push(`*AMPLITUDE, NAME=${name}, TIME=TOTAL TIME`);
       for (let a = 0; a < pts.length; a += 4) ampLines.push(pts.slice(a, a + 4).map(q => `${f(q[0], 6)}, ${f(q[1], 5)}`).join(', ') + ',');
       fluxLines.push(`*DFLUX, AMPLITUDE=${name}`, `${e.id}, BF, 1.`);
     });
@@ -218,11 +218,13 @@
     const nH = opts.nHeat || 40, nC = opts.nCool || 25;
     const tpHeat = Array.from({ length: nH }, (_, a) => tWeld * (a + 1) / nH);
     const tpCool = Array.from({ length: nC }, (_, a) => tCool * Math.pow((a + 1) / nC, 2.5));
-    const tpLines = (name, arr) => { const r = [`*TIME POINTS, NAME=${name}`]; for (let a = 0; a < arr.length; a += 6) r.push(arr.slice(a, a + 6).map(t => f(t, 6)).join(', ') + ','); return r; };
     const film = () => ['*FILM', `Etop, F2, ${f(Ta)}, ${f(FILM * 1e-3)}`, `Ebot, F1, ${f(Ta)}, ${f(FILM * 1e-3)}`,
                         '*RADIATE', `Etop, R2, ${f(Ta)}, ${f(EMISS)}`, `Ebot, R1, ${f(Ta)}, ${f(EMISS)}`];
 
     // ===== toplina.inp: nestacionarna toplinska analiza =====
+    // Svaki trenutak koji mehanička analiza učitava zaseban je korak analize: *TEMPERATURE, BSTEP=k čita
+    // posljednji ispis k-tog KORAKA u .frd datoteci (ne k-ti ispis), pa jedan ispis po koraku daje točno
+    // preslikavanje. Krivulje toka zato su zadane u ukupnom vremenu (TIME=TOTAL TIME).
     const th = [...fmtHdr('Toplinska analiza (prvi dio)'), '*HEADING', 'Zavarivanje - toplinska analiza',
       ...common('DC3D8'),
       '*MATERIAL, NAME=CELIK', '*DENSITY', f(RHO),
@@ -232,20 +234,19 @@
       '*PHYSICAL CONSTANTS, ABSOLUTE ZERO=-273.15, STEFAN BOLTZMANN=5.669E-11',
       '*INITIAL CONDITIONS, TYPE=TEMPERATURE', `Nall, ${f(T0)}`,
       '*CONTROLS, PARAMETERS=TIME INCREMENTATION', '8, 10, 9, 64, 10, 8, , 12, , ',
-      ...tpLines('TPZAV', tpHeat), ...tpLines('TPHLAD', tpCool),
-      ...ampLines,
-      '** Korak 1: prolaz izvora topline duž zavara',
-      '*STEP, INC=100000', '*HEAT TRANSFER', `${f(dt, 4)}, ${f(tWeld, 6)}, ${f(dt * 1e-4, 4)}, ${f(dt, 4)}`,
-      ...film(), ...fluxLines,
-      '*NODE FILE, TIME POINTS=TPZAV', 'NT',
-      '*NODE PRINT, NSET=Ntermopar, TIME POINTS=TPZAV', 'NT',
-      '*END STEP',
-      '** Korak 2: hlađenje',
-      '*STEP, INC=100000', '*HEAT TRANSFER', `${f(dt, 4)}, ${f(tCool, 6)}, ${f(dt * 1e-4, 4)}, 100.`,
-      '*DFLUX, OP=NEW', ...film(),
-      '*NODE FILE, TIME POINTS=TPHLAD', 'NT',
-      '*NODE PRINT, NSET=Ntermopar, TIME POINTS=TPHLAD', 'NT',
-      '*END STEP'];
+      ...ampLines];
+    const tEnds = [...tpHeat, ...tpCool.map(t => tWeld + t)];
+    let tPrev = 0;
+    tEnds.forEach((tEnd, k) => {
+      const dur = tEnd - tPrev, heat = k < nH;
+      const dtMax = heat ? dt : Math.max(dt, Math.min(100, dur));
+      th.push(`** Korak ${k + 1}: ${heat ? 'zavarivanje' : 'hlađenje'} do t = ${f(tEnd, 5)} s`,
+        '*STEP, INC=100000', '*HEAT TRANSFER', `${f(Math.min(dt, dur), 4)}, ${f(dur, 6)}, ${f(Math.min(dt, dur) * 1e-4, 4)}, ${f(dtMax, 4)}`);
+      if (k === 0) th.push(...film(), ...fluxLines);
+      if (k === nH) th.push('*DFLUX, OP=NEW');
+      th.push('*NODE FILE, FREQUENCY=100000', 'NT', '*NODE PRINT, NSET=Ntermopar, FREQUENCY=100000', 'NT', '*END STEP');
+      tPrev = tEnd;
+    });
 
     // ===== naprezanja.inp: mehanička analiza s temperaturama iz toplina.frd =====
     const mech = [...fmtHdr('Mehanička analiza (drugi dio, pokreće se nakon toplina.inp)'), '*HEADING', 'Zavarivanje - zaostala naprezanja',

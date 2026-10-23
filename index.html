@@ -13,48 +13,30 @@
 <div class="wrap">
 
 <header class="top">
-  <div>
-    <h1>Provjera parametara zavarivanja</h1>
-    <p>Upiši stvarne uvjete na radnom mjestu i parametre iz WPS-a. Program računa toplinski ciklus, tvrdoću ZUT-a, potrebno predgrijavanje i raspodjelu zaostalih naprezanja, procjenjuje rizik i predlaže korekciju parametara.</p>
-  </div>
-  <div class="head-actions">
-    <div class="stamp">Demo verzija 5</div>
-    <div class="row">
-      <button type="button" class="toggle-notes" id="toggleNotes" aria-pressed="false">Prikaži sve napomene</button>
-      <button type="button" class="ghost" id="printBtn">Ispiši izvještaj</button>
-    </div>
-  </div>
+  <h1>Provjera parametara zavarivanja</h1>
+  <p>Toplinski ciklus, zaostala naprezanja i rizik od grešaka iz stvarnih uvjeta na radnom mjestu. <span class="ver">Demo, verzija 6</span></p>
 </header>
 
-<nav class="jump" aria-label="Dijelovi stranice">
-  <a href="#procjena">Procjena</a>
-  <a href="#polje">Temperaturno polje</a>
-  <a href="#naprezanja">Modeli naprezanja</a>
-  <a href="#prozor">Procesni prozor</a>
-  <a href="#usporedba">Sunce i sjena</a>
-  <a href="#dnevnik">Dnevnik zavara</a>
-  <a href="#plan">Plan razvoja</a>
-  <a href="#izvori">Izvori</a>
+<nav class="tabs" aria-label="Stranice">
+  <a href="#procjena" data-tab="t-procjena">Procjena</a>
+  <a href="#polje" data-tab="t-toplina">Toplina</a>
+  <a href="#naprezanja" data-tab="t-naprezanja">Naprezanja</a>
+  <a href="#surogat" data-tab="t-surogat">Surogatni model</a>
+  <a href="#dnevnik" data-tab="t-dnevnik">Dnevnik</a>
+  <a href="#plan" data-tab="t-orad">O radu</a>
 </nav>
+<p class="insum" id="inSum" hidden></p>
 
-<!-- ============ UVOD ============ -->
-<section class="intro" aria-labelledby="introH">
-  <div class="intro-head">
-    <h2 id="introH">Kako se koristi</h2>
-    <div class="row noprint">
-      <button type="button" id="exBtn">Prikaži primjer</button>
-    </div>
-  </div>
+<div class="tab" id="t-procjena">
+<section class="intro" aria-label="Kako se koristi">
   <ol class="guide">
-    <li><b>Upiši uvjete</b><span>Izmjerenu temperaturu komada, vlagu, materijal (ili učitaj certifikat) i parametre iz WPS-a. <a href="#procjena">Ulazni podaci</a></span></li>
-    <li><b>Pogledaj procjenu</b><span>t8/5, tvrdoću ZUT-a, potrebno predgrijavanje, indeks rizika i preporuku za zavarivača. <a href="#procjena">Procjena</a></span></li>
-    <li><b>Usporedi s MKE</b><span>Analitičke modele naprezanja i Rosenthalov ciklus s rezultatima iz CalculiX-a. <a href="#naprezanja">Modeli naprezanja</a></span></li>
-    <li><b>Upiši mjerenja</b><span>Nakon ispitivanja: t8/5, tvrdoću i nađene greške. Program iz njih uči korekcije i težine rizika. <a href="#dnevnik">Dnevnik zavara</a></span></li>
+    <li><b>Upiši uvjete</b><span>izmjerenu temperaturu komada, materijal i parametre iz WPS-a</span></li>
+    <li><b>Pročitaj procjenu</b><span>rizik, t8/5, tvrdoću i preporuku za zavarivača</span></li>
+    <li><b>Usporedi</b><span>s proračunom u <a href="#naprezanja">CalculiX-u</a> i <a href="#surogat">surogatnim modelom</a></span></li>
+    <li><b>Upiši mjerenja</b><span>u <a href="#dnevnik">dnevnik</a>, iz kojeg program uči</span></li>
   </ol>
-  <p class="hint" id="exMsg" role="status">"Prikaži primjer" upisuje ulaze za koje je priložen stvarni proračun u CalculiX-u, učitava njegove rezultate i dodaje izmišljene zapise u dnevnik, pa se svi dijelovi stranice odmah vide ispunjeni.</p>
-  <p class="hint" id="verNote"></p>
+  <div class="row noprint"><button type="button" id="exBtn">Prikaži primjer</button><span class="hint" id="exMsg" role="status" style="margin:0">Upisuje ulaze za koje postoji proračun u CalculiX-u i dodaje primjere u dnevnik.</span></div>
 </section>
-
 <!-- ============ ULAZI I PROCJENA ============ -->
 <div class="grid" id="procjena">
   <form class="sheet" id="f" autocomplete="off" onsubmit="return false">
@@ -239,6 +221,33 @@
   </div>
 </div>
 
+<!-- ============ PROCESNI PROZOR ============ -->
+<section class="block" id="prozor">
+  <h2>Procesni prozor</h2>
+  <p class="lead">Karta rizika za sve kombinacije struje i brzine, uz trenutne uvjete. Svijetlo područje je sigurno. Prijeđi mišem preko karte za vrijednosti u točki.</p>
+  <div class="sheet">
+    <div class="row noprint" style="padding:12px 18px 0" role="group" aria-label="Temperatura komada za kartu">
+      <span style="color:var(--muted);font-size:.9rem">Temperatura komada:</span>
+      <button type="button" class="seg" data-pw="meas" aria-pressed="true">Izmjerena</button>
+      <button type="button" class="seg" data-pw="A" aria-pressed="false">Komad A (sunce)</button>
+      <button type="button" class="seg" data-pw="B" aria-pressed="false">Komad B (sjena)</button>
+      <button type="button" class="seg" data-pw="reco" aria-pressed="false" id="pwReco">Uz preporučeno predgrijavanje</button>
+    </div>
+    <div class="pwwrap"><canvas id="pw" width="760" height="420" aria-label="Karta rizika u ravnini struja–brzina"></canvas></div>
+    <div style="padding:0 18px 6px">
+      <div class="tint small" aria-hidden="true"></div>
+      <div class="tint-scale"><span>rizik 0</span><span>50</span><span>100</span></div>
+    </div>
+    <p class="readout" id="pwOut">&nbsp;</p>
+    <details class="how"><summary>Kako čitati kartu</summary>
+      <p>Za svaku kombinaciju struje i brzine program računa indeks rizika uz odabranu temperaturu komada; napon pritom prati struju ako je to uključeno. Puna linija spaja kombinacije s istim unosom topline kao u WPS-u, a isprekidane označavaju granice ±25 %. Krug je trenutna točka, a romb preporuka. Ako preporuka uključuje predgrijavanje, gumb "Uz preporučeno predgrijavanje" pokazuje kako izgleda karta nakon njega.</p>
+      <p>Usporedba karata za komad sa sunca i iz sjene pokazuje kako se sigurno područje pomiče samo zbog početne temperature, uz isti WPS.</p>
+    </details>
+  </div>
+</section>
+
+</div>
+<div class="tab" id="t-toplina" hidden>
 <!-- ============ TEMPERATURNO POLJE ============ -->
 <section class="block" id="polje">
   <h2>Temperaturno polje i toplinski ciklus</h2>
@@ -282,6 +291,35 @@
   </details>
 </section>
 
+<!-- ============ SUNCE I SJENA ============ -->
+<section class="block" id="usporedba">
+  <h2>Isti parametri, različit komad</h2>
+  <p class="lead">Dva dijela iste šarže: jedan je stajao na suncu, drugi u sjeni. Oba se zavaruju prema istom WPS-u, a rezultat se razlikuje zbog početne temperature komada.</p>
+  <div class="cmp">
+    <div>
+      <h3>Komad A, na suncu</h3>
+      <label>Temperatura komada, °C<input type="number" id="TA" value="38"></label>
+      <dl id="dA"></dl>
+    </div>
+    <div>
+      <h3>Komad B, u sjeni</h3>
+      <label>Temperatura komada, °C<input type="number" id="TB" value="6"></label>
+      <dl id="dB"></dl>
+    </div>
+  </div>
+  <div class="chartbox bordered"><svg id="chart" viewBox="0 0 640 270" role="img" aria-label="Vrijeme hlađenja t8/5 i tvrdoća u ovisnosti o temperaturi komada"></svg></div>
+  <details class="how"><summary>Kako će se ovo provjeriti pokusom</summary>
+    <p>Ploče iste šarže dijele se u skupine koje se prije zavarivanja dovedu na različite početne temperature, dok se svi ostali parametri drže jednakima, po mogućnosti uz automatsko vođenje pištolja kako bi se isključio utjecaj ruke zavarivača.</p>
+    <ul>
+      <li>Tijekom zavarivanja: termoparovima se snima stvarni toplinski ciklus i uspoređuje s izračunatim.</li>
+      <li>Nakon zavarivanja: mjerenje tvrdoće ZUT-a, zaostalih naprezanja i kutne deformacije, uz nerazorna ispitivanja na greške.</li>
+      <li>Rezultati se upisuju u dnevnik zavara ispod, a razlike između skupina uspoređuju se s predviđenima.</li>
+    </ul>
+  </details>
+</section>
+
+</div>
+<div class="tab" id="t-naprezanja" hidden>
 <!-- ============ ZAOSTALA NAPREZANJA ============ -->
 <section class="block" id="naprezanja">
   <h2>Modeli zaostalih naprezanja</h2>
@@ -291,6 +329,7 @@
     <div class="row noprint" style="padding:12px 18px 0" role="group" aria-label="Modeli">
       <label class="check" style="grid-column:auto"><input type="checkbox" id="smMM" checked> Masubuchi i Martin</label>
       <label class="check" style="grid-column:auto"><input type="checkbox" id="smOK" checked> Okerblom</label>
+      <label class="check" style="grid-column:auto"><input type="checkbox" id="smSU" checked> Surogatni model</label>
     </div>
     <div class="chartbox"><svg id="stress" viewBox="0 0 760 320" role="img" aria-label="Raspodjela uzdužnih zaostalih naprezanja poprečno na zavar"></svg></div>
     <div class="tablewrap" style="padding:0 18px"><table class="t" id="stressTable"></table></div>
@@ -323,7 +362,7 @@
         <p>Prva analiza računa temperaturno polje dok Goldakov izvor prolazi duž zavara i tijekom hlađenja. Druga je mehanička: u svakom koraku učitava temperature iz <code>toplina.frd</code> i računa elastoplastične deformacije, a na kraju ploču ohladi na temperaturu okoline. Skripta zatim izdvaja tri CSV datoteke: <code>profil_sx.csv</code> i <code>profil_sy.csv</code> učitaju se ovdje ispod, kao rezultati iz CalculiX-a, a <code>ciklus_T.csv</code> u dijelu s toplinskim ciklusom, za usporedbu s Rosenthalovim rješenjem.</p>
         <p>Model je polovica ploče (simetrija u ravnini zavara) s heksaedarskim elementima. Pomični izvor zadan je bez korisničkih potprograma: svaki element u zoni izvora dobiva vlastitu krivulju toplinskog toka u vremenu, uzorkovanu iz Goldakove raspodjele, a ukupna snaga normira se na k·U·I. Generator izrađuje model sučeljenog spoja.</p>
         <p><b>Svojstva materijala</b> ovisna o temperaturi računaju se izrazima iz EN 1993-1-2 [7] za ugljični čelik: toplinska vodljivost, specifični toplinski kapacitet (s vrhom na 735 °C), toplinsko produljenje te faktori smanjenja granice tečenja k<sub>y</sub> i modula elastičnosti k<sub>E</sub>, pomnoženi s upisanim Re. Norma vrijedi do 1200 °C. Iznad toga, kao i najmanja krutost i čvrstoća (5 %) te očvršćenje od 10 %, vrijednosti su numeričke pretpostavke. Faktor k<sub>y</sub> u normi odgovara deformaciji od 2 % (proračun na požar), pa za zavarivanje daje nešto višu granicu tečenja između 200 i 400 °C od vrijednosti za 0,2 %.</p>
-        <p>Preporuka za prvi proračun je gruba mreža i kraći zavar (npr. L = 200 mm, B = 120 mm), što na običnom računalu traje nekoliko minuta. Procjena trajanja izmjerena je na računalu s dvije jezgre.</p>
+        <p>Preporuka za prvi proračun je gruba mreža i kraći zavar (npr. L = 200 mm, B = 120 mm), što na običnom računalu traje nekoliko minuta. Procjena trajanja prilagođena je na 37 proračuna na računalu s dvije jezgre; na bržem računalu proračun je kraći.</p>
       </details>
     </div>
     <div class="fem noprint">
@@ -349,58 +388,63 @@
   </div>
 </section>
 
-<!-- ============ PROCESNI PROZOR ============ -->
-<section class="block" id="prozor">
-  <h2>Procesni prozor</h2>
-  <p class="lead">Karta rizika za sve kombinacije struje i brzine, uz trenutne uvjete. Svijetlo područje je sigurno. Prijeđi mišem preko karte za vrijednosti u točki.</p>
+</div>
+<div class="tab" id="t-surogat" hidden>
+<!-- ============ SUROGATNI MODEL ============ -->
+<section class="block" id="surogat">
+  <h2>Surogatni model naprezanja</h2>
+  <p class="lead">Model naučen na 36 proračuna u CalculiX-u predviđa u djeliću sekunde, uz procjenu vlastite nesigurnosti, ono za što MKE proračun treba nekoliko minuta. Uspoređuju se dva pristupa: hibridni (analitički model + Gaussova procesna regresija koja uči njegovo odstupanje) i čisti GPR bez fizikalnog modela. Za svaku veličinu koristi se onaj koji se na provjeri pokazao boljim.</p>
   <div class="sheet">
-    <div class="row noprint" style="padding:12px 18px 0" role="group" aria-label="Temperatura komada za kartu">
-      <span style="color:var(--muted);font-size:.9rem">Temperatura komada:</span>
-      <button type="button" class="seg" data-pw="meas" aria-pressed="true">Izmjerena</button>
-      <button type="button" class="seg" data-pw="A" aria-pressed="false">Komad A (sunce)</button>
-      <button type="button" class="seg" data-pw="B" aria-pressed="false">Komad B (sjena)</button>
-      <button type="button" class="seg" data-pw="reco" aria-pressed="false" id="pwReco">Uz preporučeno predgrijavanje</button>
+    <h3 class="sh">Predviđanje za trenutne ulaze</h3>
+    <div class="tablewrap" style="padding:0 18px"><table class="t" id="suTable"></table></div>
+    <p class="warnline" id="suWarn" style="padding:0 18px"></p>
+    <h3 class="sh" style="border-top:1px solid var(--line);margin-top:6px">Kako se veličina mijenja s temperaturom komada</h3>
+    <div class="row noprint" style="padding:12px 18px 0">
+      <label class="inl">Veličina<select id="suOut"></select></label>
     </div>
-    <div class="pwwrap"><canvas id="pw" width="760" height="420" aria-label="Karta rizika u ravnini struja–brzina"></canvas></div>
-    <div style="padding:0 18px 6px">
-      <div class="tint small" aria-hidden="true"></div>
-      <div class="tint-scale"><span>rizik 0</span><span>50</span><span>100</span></div>
-    </div>
-    <p class="readout" id="pwOut">&nbsp;</p>
-    <details class="how"><summary>Kako čitati kartu</summary>
-      <p>Za svaku kombinaciju struje i brzine program računa indeks rizika uz odabranu temperaturu komada; napon pritom prati struju ako je to uključeno. Puna linija spaja kombinacije s istim unosom topline kao u WPS-u, a isprekidane označavaju granice ±25 %. Krug je trenutna točka, a romb preporuka. Ako preporuka uključuje predgrijavanje, gumb "Uz preporučeno predgrijavanje" pokazuje kako izgleda karta nakon njega.</p>
-      <p>Usporedba karata za komad sa sunca i iz sjene pokazuje kako se sigurno područje pomiče samo zbog početne temperature, uz isti WPS.</p>
-    </details>
+    <div class="chartbox"><svg id="suCurve" viewBox="0 0 760 300" role="img" aria-label="Predviđanje u ovisnosti o temperaturi komada"></svg></div>
+    <p class="readout" id="suCurveOut"></p>
   </div>
-</section>
-
-<!-- ============ SUNCE I SJENA ============ -->
-<section class="block" id="usporedba">
-  <h2>Isti parametri, različit komad</h2>
-  <p class="lead">Dva dijela iste šarže: jedan je stajao na suncu, drugi u sjeni. Oba se zavaruju prema istom WPS-u, a rezultat se razlikuje zbog početne temperature komada.</p>
-  <div class="cmp">
-    <div>
-      <h3>Komad A, na suncu</h3>
-      <label>Temperatura komada, °C<input type="number" id="TA" value="38"></label>
-      <dl id="dA"></dl>
+  <div class="grid2" style="margin-top:28px">
+    <div class="sheet">
+      <h3 class="sh">Provjera na simulacijama</h3>
+      <div class="tablewrap" style="padding:0 18px"><table class="t" id="suCV"></table></div>
+      <p class="note" id="suCVNote" style="padding:0 18px 14px"></p>
     </div>
-    <div>
-      <h3>Komad B, u sjeni</h3>
-      <label>Temperatura komada, °C<input type="number" id="TB" value="6"></label>
-      <dl id="dB"></dl>
+    <div class="sheet">
+      <h3 class="sh">Predviđeno i izračunato u CalculiX-u</h3>
+      <div class="chartbox"><svg id="suParity" viewBox="0 0 360 320" role="img" aria-label="Predviđeno prema izračunatom u CalculiX-u"></svg></div>
+      <p class="hint" style="padding:0 18px 14px">Svaka točka je jedna simulacija koju model pri tom predviđanju nije vidio ("izostavi jedan"). Crtica je 95 % interval odabranog modela.</p>
     </div>
   </div>
-  <div class="chartbox bordered"><svg id="chart" viewBox="0 0 640 270" role="img" aria-label="Vrijeme hlađenja t8/5 i tvrdoća u ovisnosti o temperaturi komada"></svg></div>
-  <details class="how"><summary>Kako će se ovo provjeriti pokusom</summary>
-    <p>Ploče iste šarže dijele se u skupine koje se prije zavarivanja dovedu na različite početne temperature, dok se svi ostali parametri drže jednakima, po mogućnosti uz automatsko vođenje pištolja kako bi se isključio utjecaj ruke zavarivača.</p>
-    <ul>
-      <li>Tijekom zavarivanja: termoparovima se snima stvarni toplinski ciklus i uspoređuje s izračunatim.</li>
-      <li>Nakon zavarivanja: mjerenje tvrdoće ZUT-a, zaostalih naprezanja i kutne deformacije, uz nerazorna ispitivanja na greške.</li>
-      <li>Rezultati se upisuju u dnevnik zavara ispod, a razlike između skupina uspoređuju se s predviđenima.</li>
-    </ul>
+  <div class="sheet" style="margin-top:28px">
+    <h3 class="sh">Provjera izvan raspona učenja</h3>
+    <div class="tablewrap" style="padding:0 18px"><table class="t" id="suEx"></table></div>
+    <p class="note" style="padding:0 18px 14px">Model se uči samo na nižem dijelu raspona jednog ulaza, a provjerava na simulacijama iz višeg dijela, koje nije vidio. Srednja apsolutna pogreška; najmanja je podebljana. Ovdje fizikalni model najviše pomaže kod t8/5: čisti GPR izvan podataka griješi i dvostruko više.</p>
+  </div>
+  <div class="sheet" style="margin-top:28px">
+    <h3 class="sh">Skup simulacija</h3>
+    <div class="tablewrap" style="padding:0 18px"><table class="t" id="suData"></table></div>
+    <div class="row noprint" style="padding:10px 18px 14px">
+      <button type="button" class="ghost" id="suCsv">Preuzmi skup podataka (CSV)</button>
+      <button type="button" class="ghost" id="suRefit">Ponovno nauči hiperparametre</button>
+      <span class="hint" id="suMsg" role="status" style="margin:0"></span>
+    </div>
+  </div>
+  <details class="how"><summary>Kako je model izgrađen</summary>
+    <p><b>Podaci.</b> Generatorom s ove stranice izrađeno je 36 proračuna u CalculiX-u (gruba mreža, sučeljeni spoj, B = 120 mm, L = 200 mm, srednja ukliještenost). Ulazi su raspoređeni Latinskom hiperkockom, tako da je svaki ulaz jednoliko pokriven: unos topline Q, temperatura komada T₀, debljina d i granica tečenja Re. Iz svakog proračuna izdvojeni su najveće uzdužno naprezanje σx, poluširina vlačne zone b (udaljenost na kojoj σx prvi put padne na nulu), t8/5 uz rub taline i poprečno naprezanje σy u sredini zavara. Gruba mreža provjerena je na srednjoj: najveći σx razlikuje se 8 %, a b, t8/5 i σy do 2 %. Vrijednost σx u samoj osi zavara nije izlaz modela jer se između te dvije mreže razlikuje 36 %.</p>
+    <p><b>Hibridni model.</b> GPR ne uči samu vrijednost, nego odstupanje proračuna od analitičkog modela (Masubuchi i Martin za σx i b, EN 1011-2 za t8/5, model poprečnih naprezanja za σy). Omjeri se uče u logaritmu, pa predviđanje ostaje pozitivno, a naprezanja u jedinicama Re. Izvan raspona podataka predviđanje se vraća prema analitičkom modelu. <b>Čisti GPR</b> uči izravno vrijednost iz CalculiX-a, bez fizikalnog modela.</p>
+    <p><b>Odabir.</b> Koristi se hibridni model, osim ako je čisti GPR bolji i unutar raspona ("izostavi jedan") i izvan njega. Rezultat: za t8/5 i σy bolji je hibridni model, jer EN 1011-2 dobro opisuje trend t8/5, a analitički model σy daje barem ispravnu ovisnost o Re. Za najveći σx i širinu vlačne zone bolji je čisti GPR, jer analitički modeli tu imaju krivi trend: Masubuchi i Martin pretpostavljaju vrh jednak Re, a proračuni daju 1,0–1,2·Re u ZUT-u. Fizikalni model pomaže samo onoliko koliko je dobar.</p>
+    <div class="f">ŷ(x) = f<sub>analitički</sub>(x) ⊕ GPR(x), &nbsp; GPR: k(x, x′) = σ<sub>f</sub>² · exp[−½ Σ (x<sub>i</sub> − x′<sub>i</sub>)² / ℓ<sub>i</sub>²] + σ<sub>n</sub>² δ</div>
+    <p>Duljine ℓ<sub>i</sub> uče se za svaki ulaz posebno, maksimizacijom marginalne vjerodostojnosti. Kratka duljina znači da ulaz jako utječe na odstupanje, a duga da ga model gotovo zanemaruje.</p>
+    <p><b>Fizikalni uvjeti.</b> Najveći σx ograničen je na 1,3·Re (u proračunima zbog očvršćenja i višeosnog stanja naprezanja doseže do oko 1,17·Re), a b i t8/5 ne mogu biti negativni. Raspodjela σx na dijagramu iznad ima oblik Masubuchija i Martina s hibridnim najvećim naprezanjem i poluširinom b, pa je samouravnotežena: uzdužna sila preko presjeka jednaka je nuli. To je omotnica raspodjele: proračuni u samom zavaru pokazuju niže naprezanje nego u ZUT-u (M-oblik), što taj oblik ne prikazuje.</p>
+    <p><b>Provjera.</b> Pogreška se računa unakrsnom validacijom "izostavi jedan" u zatvorenom obliku (Rasmussen i Williams, 2006.), uz hiperparametre naučene na svim podacima. Usporedbe radi prikazuje se i "čisti" GPR, koji analitički model ne koristi. Pokrivenost je udio simulacija koje leže unutar 95 % intervala; dobro kalibriran model ima oko 95 %.</p>
+    <p><b>Ograničenja.</b> Model vrijedi za raspon ulaza iz tablice "Skup simulacija" i za geometriju iz proračuna (B = 120 mm, L = 200 mm). Za drugačije ulaze stranica to javlja, a nesigurnost raste. Uči odstupanje od MKE proračuna, ne od mjerenja, pa ne može biti točniji od samog proračuna.</p>
   </details>
 </section>
 
+</div>
+<div class="tab" id="t-dnevnik" hidden>
 <!-- ============ DNEVNIK ============ -->
 <section class="block" id="dnevnik">
   <h2>Dnevnik zavara</h2>
@@ -453,6 +497,8 @@
   </details>
 </section>
 
+</div>
+<div class="tab" id="t-orad" hidden>
 <!-- ============ PLAN ============ -->
 <section class="block" id="plan">
   <h2>Plan razvoja</h2>
@@ -471,7 +517,7 @@
       </details></li>
     <li><b>Planirani pokusi</b><span>Namjerno izazivanje nepovoljnih uvjeta (hladan ili vlažan komad, prevelik ili premalen unos topline) i mjerenje rezultata.</span>
       <details class="how"><summary>Kako se radi</summary><p>Plan pokusa (faktorski ili Taguchijev) da se s najmanje uzoraka obuhvati utjecaj temperature komada, unosa topline, vlažnosti i predgrijavanja. Svaki uzorak upisuje se u dnevnik zavara.</p></details></li>
-    <li class="now"><b>Model strojnog učenja</b><span>Prvi korak radi: korekcija t8/5 i tvrdoće iz dnevnika s unakrsnom validacijom, te kalibracija k iz izmjerenog ciklusa. Slijede složeniji modeli kad bude više podataka.</span>
+    <li class="now"><b>Model strojnog učenja</b><span>Radi: hibridni surogatni model naprezanja (analitički model + Gaussova procesna regresija) naučen na 36 proračuna u CalculiX-u, korekcije t8/5 i tvrdoće iz dnevnika, učenje težina rizika i kalibracija k. Slijedi proširenje skupa simulacija i provjera na mjerenjima.</span>
       <details class="how"><summary>Kako se radi</summary><p>Kao ulazi koriste se i fizikalne veličine (Q, t8/5, CE, CET), a ne samo sirovi parametri. Usporedit će se jednostavniji modeli (regresija, random forest) s neuronskom mrežom, uz unakrsnu validaciju. Simulacije iz CalculiX-a proširuju mali eksperimentalni skup.</p></details></li>
     <li><b>Prilagodba zavarivaču</b><span>Uključivanje stvarno postignutih parametara pojedinog zavarivača u preporuku.</span>
       <details class="how"><summary>Kako se radi</summary><p>Iz dnevnika se za svakog zavarivača računa razlika između zadanih i postignutih parametara (npr. sustavno brže vođenje). Program je uzima u obzir, pa preporuka postaje prilagođena osobi, a ne samo WPS-u.</p></details></li>
@@ -512,7 +558,7 @@
         <tr><td>Ocjena uzroka (rampe, npr. 60 HV ispod granice, rosište + 3 °C)</td><td>Stručna procjena</td><td>Pokusi s namjerno lošim uvjetima</td></tr>
         <tr><td>Ciljani t8/5 i najveća temperatura komada</td><td>Orijentacijske vrijednosti po materijalu</td><td>Tehnički list proizvođača čelika</td></tr>
         <tr><td>Sastav i Re odabranog materijala</td><td>Tipične vrijednosti</td><td>Certifikat 3.1 [6] (učitavanje radi)</td></tr>
-        <tr><td>Poluširina vlačne zone (kriterij 2·Re/(E·α))</td><td>Pojednostavljeni kriterij plastifikacije</td><td>CalculiX: u primjeru σx pada gotovo na nulu na 11–14 mm od osi (Masubuchi i Martin: 12,3 mm), ali do oko 30 mm ostaje blagi drugi vlačni vrh koji analitički modeli nemaju; isti je i na finoj mreži</td></tr>
+        <tr><td>Poluširina vlačne zone (kriterij 2·Re/(E·α))</td><td>Pojednostavljeni kriterij plastifikacije</td><td>CalculiX: u primjeru je poluširina vlačne zone 14,6 mm (Masubuchi i Martin: 12,3 mm, Okerblom: 24,8 mm); najveće naprezanje je u ZUT-u, a u zavaru niže (M-oblik). Hibridni surogatni model uči to odstupanje</td></tr>
         <tr><td>Poprečna naprezanja: 0,2·Re i reakcija ukliještenosti</td><td>Pretpostavljene amplitude</td><td>CalculiX i mjerenja</td></tr>
         <tr><td>Svojstva čelika iznad 1200 °C, donje granice krutosti i čvrstoće, očvršćenje</td><td>Numeričke pretpostavke</td><td>Ispitivanja stvarnog materijala na povišenim temperaturama ili literatura</td></tr>
         <tr><td>Goldakovi parametri izvora</td><td>Iz širine taline po Rosenthalu, povećani na veličinu elemenata</td><td>Makroizbrusak zavara</td></tr>
@@ -522,13 +568,18 @@
 </section>
 
 <footer>
+  <p id="verNote"></p>
+  <button type="button" class="ghost small" id="printBtn">Ispiši trenutnu stranicu</button>
   Demo prototip za diplomski rad. Izrazi iz normi i literature navedenih u dijelu "Izvori" primijenjeni su u pojednostavljenom obliku; procjena rizika i raspodjela zaostalih naprezanja su orijentacijske i nisu zamjena za WPS ni za ispitivanje.
 </footer>
+</div>
 </div>
 
 <script src="physics.js"></script>
 <script src="cert.js"></script>
 <script src="calculix.js"></script>
+<script src="surrogate.js"></script>
+<script src="surogat-podaci.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

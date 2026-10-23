@@ -85,13 +85,13 @@
     REC = W.recommend(p, { coupleU: p.coupleU });
     ST = W.stressProfile(p, p.T0);
     if (probeAuto) probeY = Math.max(0.5, W.distanceForPeak(p, 1350, p.T0));
-    renderSummary(); renderReco(); renderStress(); renderCycle(); renderCompare(); renderPW(); renderCcx();
+    renderInSum(); renderSummary(); renderReco(); renderSurrogate(); renderStress(); renderCycle(); renderCompare(); renderPW(); renderCcx();
     fieldStateDirty = true;
     if (!playing) drawField();
   }
 
   function showError(msg) {
-    P = null;
+    P = null; renderInSum();
     $('risk').textContent = '–'; $('verdict').textContent = msg; $('verdict').style.color = 'var(--bad)';
     ['mQ', 'mT85', 'mHV', 'mTp', 'mDew', 'mB'].forEach(id => { $(id).textContent = '–'; });
     $('causes').innerHTML = ''; $('cetWarn').textContent = ''; $('ceOut').textContent = '';
@@ -314,6 +314,14 @@
     };
     if (showOK) s += curve(M.OK.at, bronze, 2.4, '');
     if (showMM) s += curve(M.MM.at, ink, 2.4, '');
+    const showSU = $('smSU').checked && SU.pred;
+    if (showSU) {
+      const prof = window.SUR.profile(SU.pred), q = SU.pred.out.sxMax, violet = css('--violet');
+      const band = [];
+      for (let i = 0; i <= 200; i++) { const y = -ym + 2 * ym * i / 200, f = prof(y) / q.val; band.push([y, Math.max(f * q.vlo, f * q.vup), Math.min(f * q.vlo, f * q.vup)]); }
+      s += `<polygon fill="${violet}" opacity=".16" points="${band.map(r => A.X(r[0]).toFixed(1) + ',' + A.Y(r[1]).toFixed(1)).concat(band.slice().reverse().map(r => A.X(r[0]).toFixed(1) + ',' + A.Y(r[2]).toFixed(1))).join(' ')}"/>`;
+      s += curve(prof, violet, 2.6, '');
+    }
     if (femX) {
       s += `<polyline fill="none" stroke="${blue}" stroke-width="1.5" points="${femX.filter(q => Math.abs(q[0]) <= ym).map(q => A.X(q[0]).toFixed(1) + ',' + A.Y(q[1]).toFixed(1)).join(' ')}"/>`;
       femX.filter(q => Math.abs(q[0]) <= ym).forEach(q => { s += `<circle cx="${A.X(q[0]).toFixed(1)}" cy="${A.Y(q[1]).toFixed(1)}" r="2.6" fill="${blue}"/>`; });
@@ -322,6 +330,7 @@
     let lx = o.W - o.R - 8, items = [];
     if (showMM) items.push(['Masubuchi i Martin', ink]);
     if (showOK) items.push(['Okerblom', bronze]);
+    if (showSU) items.push(['Surogatni model', css('--violet')]);
     if (femX) items.push(['CalculiX', blue]);
     let lxx = o.L; items.forEach(it => { s += `<line x1="${lxx}" x2="${lxx + 22}" y1="14" y2="14" stroke="${it[1]}" stroke-width="3"/><text x="${lxx + 28}" y="18" style="fill:${ink}">${it[0]}</text>`; lxx += 40 + it[0].length * 7; });
     $('stress').innerHTML = s;
@@ -330,11 +339,15 @@
     const rows = [];
     const femStats = femX ? (() => {
       const pk = Math.max(...femX.map(q => q[1])), mn = Math.min(...femX.map(q => q[1]));
-      const tens = femX.filter(q => q[1] > 0).map(q => Math.abs(q[0]));
-      return { peak: pk, comp: mn, b: tens.length ? Math.max(...tens) : NaN };
+      // poluširina vlačne zone: prvi prolaz kroz nulu desno od najvećeg naprezanja (linearna interpolacija)
+      const r = femX.filter(q => q[0] >= 0).sort((u, v) => u[0] - v[0]);
+      let im = 0; r.forEach((q, i) => { if (q[1] > r[im][1]) im = i; });
+      let b = NaN; for (let i = im + 1; i < r.length; i++) if (r[i - 1][1] > 0 && r[i][1] <= 0) { b = r[i - 1][0] + (r[i][0] - r[i - 1][0]) * r[i - 1][1] / (r[i - 1][1] - r[i][1]); break; }
+      return { peak: pk, comp: mn, b };
     })() : null;
     if (showMM) rows.push(['Masubuchi i Martin', M.MM.peak, M.MM.b, M.MM.comp, M.MM.F]);
     if (showOK) rows.push(['Okerblom', M.OK.peak, M.OK.b, M.OK.comp, M.OK.F]);
+    if (showSU) rows.push(['Surogatni model', SU.pred.out.sxMax.val, SU.pred.out.b0.val, NaN, NaN]);
     if (femStats) rows.push(['CalculiX (učitano)', femStats.peak, femStats.b, femStats.comp, NaN]);
     $('stressTable').innerHTML = rows.length ? `<tr><th>Model</th><th>Vrh σx, MPa</th><th>Poluširina vlačne zone b, mm</th><th>Najveći tlak, MPa</th><th>Sila skupljanja, kN</th></tr>` +
       rows.map(r => `<tr><td>${r[0]}</td><td>${fmt(r[1], 0)}</td><td>${fmt(r[2], 1)}</td><td>${fmt(r[3], 0)}</td><td>${Number.isFinite(r[4]) ? fmt(r[4], 0) : '–'}</td></tr>`).join('') : '';
@@ -603,6 +616,125 @@
     $('chart').innerHTML = s;
   }
 
+  /* ---------------- surogatni (hibridni) model ---------------- */
+  const SU = { M: null, pred: null, out: 'sxMax', err: '' };
+  const suRows = () => window.SUROGAT_PODACI.rows.map(r => ({ ...r, y: Object.fromEntries(Object.entries(r.y).map(([k, v]) => [k, v == null ? NaN : v])) }));
+  function suInit() {
+    if (!window.SUR || !window.SUROGAT_PODACI) { SU.err = 'Podaci za surogatni model nisu učitani.'; return; }
+    try { SU.M = window.SUR.train(W, suRows(), { thetas: window.SUROGAT_PODACI.thetas, sel: window.SUROGAT_PODACI.sel }); }
+    catch (e) { SU.err = 'Surogatni model nije moguće izgraditi.'; }
+  }
+  const suFmt = (o, v) => fmt(v, o.dec);
+  function renderSurrogate() {
+    if (!SU.M) { $('suTable').innerHTML = ''; $('suWarn').textContent = SU.err; return; }
+    const S = window.SUR, pr = S.predict(W, SU.M, P); SU.pred = pr;
+    const row = o => {
+      const q = pr.out[o.id];
+      const cellv = (v, lo, up, on) => `<td>${on ? '<b>' : ''}${suFmt(o, v)}${on ? '</b>' : ''} <span class="muted">(${suFmt(o, lo)} do ${suFmt(o, up)})</span>${on ? ' <span class="tag">odabran</span>' : ''}</td>`;
+      return `<tr><td>${o.lab}, ${o.unit}</td><td>${suFmt(o, q.ana)}</td>${cellv(q.hyb, q.lo, q.up, q.sel === 'hyb')}${cellv(q.pure, q.plo, q.pup, q.sel === 'pure')}</tr>`;
+    };
+    $('suTable').innerHTML = '<tr><th>Veličina</th><th>Analitički model</th><th>Hibridni: analitički + GPR (95 % interval)</th><th>Samo GPR (95 % interval)</th></tr>' + S.OUTS.map(row).join('');
+    const w = [];
+    if (pr.outside.length) w.push('Ulazi izvan raspona simulacija: ' + pr.outside.map(f => S.FEAT_LAB[f].split(',')[0]).join(', ') + '. Predviđanje se vraća prema analitičkom modelu, a nesigurnost raste.');
+    else if (pr.maxRel > 2) w.push('Ova kombinacija ulaza daleko je od simulacija u skupu, pa je interval širi nego inače.');
+    const geo = [];
+    if (P.B !== 120) geo.push(`B = ${fmt(P.B, 0)} mm`); if (P.L !== 200) geo.push(`L = ${fmt(P.L, 0)} mm`);
+    if (P.joint !== 'butt') geo.push('kutni spoj'); if (P.restr !== 'mid') geo.push('druga ukliještenost'); if (P.proc !== 'MAG') geo.push('postupak ' + P.proc);
+    if (geo.length) w.push(`Simulacije su za sučeljeni spoj, MAG, B = 120 mm, L = 200 mm i srednju ukliještenost; upisano je ${geo.join(', ')}, pa je predviđanje samo orijentacijsko.`);
+    $('suWarn').textContent = w.join(' ');
+    renderSuCurve();
+  }
+  function renderSuCurve() {
+    const S = window.SUR, o = S.OUTS.find(q => q.id === SU.out), M = SU.M;
+    const [T1, T2] = M.S.range.T0;
+    const pts = [];
+    for (let i = 0; i <= 40; i++) {
+      const T = T1 - 20 + (T2 - T1 + 40) * i / 40;
+      const q = S.predict(W, M, { ...P, T0: T }).out[o.id];
+      pts.push({ T, a: q.ana, h: q.val, lo: q.vlo, up: q.vup });
+    }
+    const all = pts.flatMap(q => [q.a, q.lo, q.up]).filter(Number.isFinite);
+    let y0 = Math.min(...all), y1 = Math.max(...all); const pad = (y1 - y0) * 0.1 || 1; y0 -= pad; y1 += pad;
+    if (o.id !== 'syMid') y0 = Math.max(0, y0);
+    const ob = { W: 760, H: 300, L: 56, R: 16, T: 36, B: 40, x0: pts[0].T, x1: pts[pts.length - 1].T, y0, y1 };
+    ob.xt = ticks(ob.x0, ob.x1, 8); ob.yt = ticks(y0, y1, 6); ob.xl = 'temperatura komada T₀, °C'; ob.yl = `${o.lab}, ${o.unit}`;
+    const A = axes(ob); let s = A.s;
+    const violet = css('--violet'), ink = css('--ink'), muted = css('--muted');
+    s += `<rect x="${A.X(T1)}" y="${ob.T}" width="${A.X(T2) - A.X(T1)}" height="${ob.H - ob.T - ob.B}" fill="${muted}" opacity=".08"/>`;
+    s += `<text x="${A.X(T1) + 6}" y="${ob.T + 12}" style="fill:${muted}">raspon simulacija</text>`;
+    s += `<polygon fill="${violet}" opacity=".18" points="${pts.map(q => A.X(q.T).toFixed(1) + ',' + A.Y(q.up).toFixed(1)).concat(pts.slice().reverse().map(q => A.X(q.T).toFixed(1) + ',' + A.Y(q.lo).toFixed(1))).join(' ')}"/>`;
+    s += `<polyline fill="none" stroke="${ink}" stroke-width="2" stroke-dasharray="6 4" points="${pts.map(q => A.X(q.T).toFixed(1) + ',' + A.Y(q.a).toFixed(1)).join(' ')}"/>`;
+    s += `<polyline fill="none" stroke="${violet}" stroke-width="2.6" points="${pts.map(q => A.X(q.T).toFixed(1) + ',' + A.Y(q.h).toFixed(1)).join(' ')}"/>`;
+    const cur = S.predict(W, M, P).out[o.id];
+    if (P.T0 >= ob.x0 && P.T0 <= ob.x1) s += `<circle cx="${A.X(P.T0)}" cy="${A.Y(cur.val)}" r="6" fill="${violet}"/><text x="${A.X(P.T0) + 9}" y="${A.Y(cur.val) - 9}" style="fill:${ink};font-weight:600">trenutni ulazi</text>`;
+    const leg = [[`surogatni model (${M.models[o.id].sel === 'hyb' ? 'hibridni' : 'samo GPR'}) i 95 % interval`, violet, ''], ['analitički model', ink, '6 4']];
+    let lx = ob.L; leg.forEach(it => { s += `<line x1="${lx}" x2="${lx + 22}" y1="14" y2="14" stroke="${it[1]}" stroke-width="3" ${it[2] ? `stroke-dasharray="${it[2]}"` : ''}/><text x="${lx + 28}" y="18" style="fill:${ink}">${it[0]}</text>`; lx += 50 + it[0].length * 7; });
+    $('suCurve').innerHTML = s;
+    const a = pts.find(q => q.T >= T1), b = [...pts].reverse().find(q => q.T <= T2);
+    $('suCurveOut').innerHTML = `Uz ostale ulaze nepromijenjene, od ${fmt(a.T, 0)} do ${fmt(b.T, 0)} °C surogatni model daje ${o.lab.charAt(0).toLowerCase() + o.lab.slice(1)} od <b>${suFmt(o, a.h)}</b> do <b>${suFmt(o, b.h)} ${o.unit}</b>, a analitički od ${suFmt(o, a.a)} do ${suFmt(o, b.a)} ${o.unit}.`;
+  }
+  function renderSuValidation() {
+    if (!SU.M) { $('suCV').innerHTML = ''; $('suCVNote').textContent = SU.err; return; }
+    const S = window.SUR, M = SU.M;
+    $('suCV').innerHTML = '<tr><th>Veličina</th><th>Analitički</th><th>Samo GPR</th><th>Hibridni</th><th>Odabran</th><th>Pokrivenost</th></tr>' + S.OUTS.map(o => {
+      const m = M.models[o.id], best = Math.min(m.mae.ana, m.mae.pure, m.mae.hyb);
+      const c = v => `<td class="${v === best ? 'good' : ''}">${suFmt(o, v)}</td>`;
+      return `<tr><td>${o.lab}, ${o.unit}</td>${c(m.mae.ana)}${c(m.mae.pure)}${c(m.mae.hyb)}<td>${m.sel === 'hyb' ? 'hibridni' : 'samo GPR'}</td><td>${fmt(100 * m.cover, 0)} %</td></tr>`;
+    }).join('');
+    $('suCVNote').textContent = `Srednja apsolutna pogreška na ${M.n} simulacija, svaka predviđena bez nje same ("izostavi jedan"). Pokrivenost je udio simulacija unutar 95 % intervala odabranog modela.`;
+    const EX = window.SUROGAT_PODACI.extrap;
+    if (EX) {
+      const lab = { Q: 'Q ≥ 1,35 kJ/mm', T0: 'T₀ ≥ 100 °C', d: 'd ≥ 16 mm', Re: 'Re ≥ 550 MPa' };
+      $('suEx').innerHTML = '<tr><th>Izvan raspona učenja</th>' + S.OUTS.map(o => `<th>${o.lab}, ${o.unit}<br><span class="muted">analit. / GPR / hibrid</span></th>`).join('') + '</tr>' +
+        EX.map(e => `<tr><td>${lab[e.f] || e.f} <span class="muted">(${e.nTest} sim.)</span></td>` + S.OUTS.map(o => {
+          const r = e.res[o.id], best = Math.min(r.ana, r.pure, r.hyb), c = v => v === best ? `<b>${suFmt(o, v)}</b>` : suFmt(o, v);
+          return `<td>${c(r.ana)} / ${c(r.pure)} / ${c(r.hyb)}</td>`;
+        }).join('') + '</tr>').join('');
+    }
+    renderSuParity();
+    const r = M.S.range;
+    $('suData').innerHTML = '<tr><th>Ulaz</th><th>Najmanje</th><th>Najviše</th><th>Duljina ℓ (najveći σx, odabrani model)</th></tr>' + S.FEATS.map((f, i) =>
+      `<tr><td>${S.FEAT_LAB[f]}</td><td>${fmt(r[f][0], f === 'Q' ? 2 : 0)}</td><td>${fmt(r[f][1], f === 'Q' ? 2 : 0)}</td><td>${M.models.sxMax.ell[i] > 10 ? 'iznad 10 (gotovo bez utjecaja)' : fmt(M.models.sxMax.ell[i], 2)}</td></tr>`).join('');
+  }
+  function renderSuParity() {
+    const S = window.SUR, o = S.OUTS.find(q => q.id === SU.out), m = SU.M.models[o.id];
+    const all = m.pts.flatMap(q => [q.ccx, q.ana, q.vlo, q.vup]);
+    let a = Math.min(...all), b = Math.max(...all); const pad = (b - a) * 0.08 || 1; a -= pad; b += pad;
+    const ob = { W: 360, H: 320, L: 52, R: 12, T: 30, B: 40, x0: a, x1: b, y0: a, y1: b, xt: ticks(a, b, 5), yt: ticks(a, b, 5),
+      xl: `CalculiX, ${o.unit}`, yl: `predviđeno, ${o.unit}` };
+    const A = axes(ob); let s = A.s;
+    const violet = css('--violet'), ink = css('--ink');
+    s += `<line x1="${A.X(a)}" y1="${A.Y(a)}" x2="${A.X(b)}" y2="${A.Y(b)}" stroke="${css('--bronze')}" stroke-dasharray="5 4"/>`;
+    m.pts.forEach(q => { s += `<circle cx="${A.X(q.ccx).toFixed(1)}" cy="${A.Y(q.ana).toFixed(1)}" r="4.5" fill="none" stroke="${ink}" stroke-width="1.5"/>`; });
+    m.pts.forEach(q => {
+      s += `<line x1="${A.X(q.ccx).toFixed(1)}" x2="${A.X(q.ccx).toFixed(1)}" y1="${A.Y(q.vlo).toFixed(1)}" y2="${A.Y(q.vup).toFixed(1)}" stroke="${violet}" opacity=".5"/>`;
+      s += `<circle cx="${A.X(q.ccx).toFixed(1)}" cy="${A.Y(q.val).toFixed(1)}" r="4" fill="${violet}"/>`;
+    });
+    s += `<circle cx="${ob.L + 8}" cy="14" r="4" fill="${violet}"/><text x="${ob.L + 16}" y="18" style="fill:${ink}">${m.sel === 'hyb' ? 'hibridni' : 'samo GPR'}</text>`;
+    s += `<circle cx="${ob.L + 98}" cy="14" r="4.5" fill="none" stroke="${ink}" stroke-width="1.5"/><text x="${ob.L + 106}" y="18" style="fill:${ink}">analitički</text>`;
+    $('suParity').innerHTML = s;
+  }
+  function suOptions() {
+    $('suOut').innerHTML = window.SUR ? window.SUR.OUTS.map(o => `<option value="${o.id}" ${o.id === SU.out ? 'selected' : ''}>${o.lab}</option>`).join('') : '';
+  }
+  $('suOut').addEventListener('change', () => { SU.out = $('suOut').value; if (P && SU.M) { renderSuCurve(); renderSuParity(); } });
+  $('suCsv').addEventListener('click', () => {
+    const D = window.SUROGAT_PODACI; if (!D) return;
+    const cols = ['oznaka', 'I_A', 'U_V', 'v_cm_min', 'Q_kJ_mm', 'T0_C', 'd_mm', 'Re_MPa', 'sigma_x_najvece_MPa', 'b_vlacna_zona_mm', 't85_s', 'sigma_y_sred_MPa'];
+    const c = v => typeof v === 'number' ? String(+v.toFixed(4)).replace('.', ',') : v;
+    const lines = [cols.join(';'), ...D.rows.map(r => [r.id, r.x.I, r.x.U, r.x.v, r.x.Q, r.x.T0, r.x.d, r.x.Re, r.y.sxMax, r.y.b0, r.y.t85, r.y.syMid].map(c).join(';'))];
+    saveFile('surogat-simulacije.csv', new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })).then(r => { $('suMsg').textContent = r === 'saved' ? 'Skup podataka je spremljen.' : ''; });
+  });
+  $('suRefit').addEventListener('click', () => {
+    $('suMsg').textContent = 'Učim hiperparametre…'; $('suRefit').disabled = true;
+    setTimeout(() => {
+      const t = performance.now();
+      SU.M = window.SUR.train(W, suRows(), { sel: window.SUROGAT_PODACI.sel });
+      $('suMsg').textContent = `Gotovo za ${fmt((performance.now() - t) / 1000, 1)} s.`; $('suRefit').disabled = false;
+      renderSuValidation(); if (P) { renderSurrogate(); renderStress(); }
+    }, 30);
+  });
+
   /* ---------------- spremanje datoteka ---------------- */
   // U Claude artefaktu kroz mogućnost "downloads" (preglednik traži potvrdu), drugdje običnim preuzimanjem
   async function saveFile(filename, data, type = 'text/plain;charset=utf-8') {
@@ -777,7 +909,7 @@
     const b = ev.target.closest('button'); if (!b) return;
     const tr = b.closest('tr'); const r = LOG.find(x => x.id === tr.dataset.id); if (!r) return;
     if (b.dataset.act === 'del') { logDelete([r.id]).then(ok => { if (ok) msg('Zapis je obrisan.'); }); }
-    if (b.dataset.act === 'load') { loadEntry(r); msg(`Ulazi zapisa ${r.oznaka || ''} učitani su u obrazac.`); $('procjena').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' }); }
+    if (b.dataset.act === 'load') { loadEntry(r); msg(`Ulazi zapisa ${r.oznaka || ''} učitani su u obrazac.`); go('procjena'); }
   });
 
   function loadEntry(r) {
@@ -1623,7 +1755,7 @@ Pravila:
     if (P) renderStress();
   });
   $('femClear').addEventListener('click', () => { FEM.x = null; FEM.y = null; $('femStatus').textContent = 'Učitani rezultati su uklonjeni.'; if (P) renderStress(); });
-  ['smMM', 'smOK'].forEach(id => $(id).addEventListener('change', () => { if (P) renderStress(); }));
+  ['smMM', 'smOK', 'smSU'].forEach(id => $(id).addEventListener('change', () => { if (P) renderStress(); }));
 
   /* ---------------- vođeni primjer ---------------- */
   // Ulazi za koje je izračunat priloženi primjer iz CalculiX-a (primjer-calculix/*.csv)
@@ -1687,7 +1819,7 @@ Pravila:
     new IntersectionObserver(en => { visible = en[0].isIntersecting; lastT = 0; }).observe(fcv);
   }
 
-  $('toggleNotes').addEventListener('click', e => {
+  if ($('toggleNotes')) $('toggleNotes').addEventListener('click', e => {
     const open = e.currentTarget.getAttribute('aria-pressed') !== 'true';
     document.querySelectorAll('details.how').forEach(d => { d.open = open; });
     e.currentTarget.setAttribute('aria-pressed', open);
@@ -1717,12 +1849,39 @@ Pravila:
   }
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { fieldStateDirty = true; if (P) render(); });
 
+  /* ---------------- stranice (kartice) ---------------- */
+  // Svaka kartica je <div class="tab">; adresa (#polje, #dnevnik…) bira karticu, a dublja sidra (#prozor) i mjesto na njoj.
+  const TAB_ROOTS = { procjena: 't-procjena', polje: 't-toplina', naprezanja: 't-naprezanja', surogat: 't-surogat', dnevnik: 't-dnevnik', plan: 't-orad' };
+  function route() {
+    const h = decodeURIComponent(location.hash.slice(1)) || 'procjena';
+    let el = document.getElementById(h);
+    let tab = el ? (el.classList.contains('tab') ? el : el.closest('.tab')) : null;
+    if (!tab) { tab = $('t-procjena'); el = null; }
+    document.querySelectorAll('.tab').forEach(t => { t.hidden = t !== tab; });
+    document.querySelectorAll('nav.tabs a').forEach(a => { if (a.dataset.tab === tab.id) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+    $('inSum').hidden = tab.id === 't-procjena';
+    // preglednik nakon promjene adrese sam skoči na sidro; to se poništava u sljedećem okviru
+    requestAnimationFrame(() => { if (el && !TAB_ROOTS[h]) el.scrollIntoView({ behavior: 'auto', block: 'start' }); else window.scrollTo(0, 0); });
+    fieldStateDirty = true; lastT = 0;
+    if (P && tab.id === 't-toplina' && !playing) drawField();
+  }
+  function go(h) { if (location.hash === '#' + h) route(); else location.hash = h; }
+  window.addEventListener('hashchange', route);
+  // sažetak ulaza na ostalim karticama
+  function renderInSum() {
+    if (!P) { $('inSum').innerHTML = 'Ulazni podaci nisu potpuni. <a href="#procjena">Ispravi ih na kartici Procjena</a>.'; return; }
+    $('inSum').innerHTML = `${esc(P.mat)}, ${fmt(P.d, 0)} mm, ${P.joint === 'butt' ? 'sučeljeni spoj' : 'kutni spoj'}; ${P.proc} ${fmt(P.I, 0)} A, ${fmt(P.U, 1)} V, ${fmt(P.v, 0)} cm/min; ` +
+      `komad ${fmt(P.T0, 0)} °C. <a href="#procjena">Promijeni ulaze</a>`;
+  }
+
   /* ---------------- pokretanje ---------------- */
   applyMaterial(); applyProcess();
   $('HD').value = '5';
   legend();
+  suOptions(); suInit(); renderSuValidation();
   loadLog(); renderLog(); initSharedLog();
   if (!playing) { xs = 120; setPlay(false); }
   render();
+  route();
   requestAnimationFrame(tick);
 })();
