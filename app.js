@@ -372,8 +372,13 @@
     let lx2 = o2.L; leg2.forEach(it => { s2 += `<line x1="${lx2}" x2="${lx2 + 22}" y1="14" y2="14" stroke="${it[1]}" stroke-width="3" ${it[2] ? `stroke-dasharray="${it[2]}"` : ''}/><text x="${lx2 + 28}" y="18" style="fill:${ink}">${it[0]}</text>`; lx2 += 40 + it[0].length * 7; });
     $('stressT').innerHTML = s2;
 
-    $('stressOut').innerHTML = `Uzdužno: vrh ≈ Re = <b>${fmt(p.Re, 0)} MPa</b>; vlačna zona ±${fmt(M.MM.b, 1)} mm (Masubuchi i Martin) odnosno ±${fmt(M.OK.b, 1)} mm (Okerblom). ` +
-      `Poprečno u sredini zavara ≈ <b>${fmt(TR.at(p.L / 2), 0)} MPa</b>, na krajevima ≈ <b>${fmt(TR.at(0), 0)} MPa</b>.`;
+    {
+      const parts = [`Analitički modeli: vrh σx ≈ Re = <b>${fmt(p.Re, 0)} MPa</b> u osi zavara, vlačna zona ±${fmt(M.MM.b, 1)} mm (Masubuchi i Martin) odnosno ±${fmt(M.OK.b, 1)} mm (Okerblom), σy u sredini ≈ ${fmt(TR.at(p.L / 2), 0)} MPa.`];
+      if (SU.pred) parts.push(`Surogatni model: najveći σx <b>${fmt(SU.pred.out.sxMax.val, 0)} MPa</b>, vlačna zona ±${fmt(SU.pred.out.b0.val, 1)} mm, σy u sredini <b>${fmt(SU.pred.out.syMid.val, 0)} MPa</b>.`);
+      if (femStats) parts.push(`CalculiX (učitano): najveći σx <b>${fmt(femStats.peak, 0)} MPa</b>${Number.isFinite(femStats.b) ? `, vlačna zona ±${fmt(femStats.b, 1)} mm` : ''}.`);
+      if (femY) { const mid = femY.filter(q => Math.abs(q[0] - p.L / 2) < p.L * 0.15); if (mid.length) parts.push(`CalculiX σy u sredini zavara ≈ <b>${fmt(mid.reduce((a, q) => a + q[1], 0) / mid.length, 0)} MPa</b>.`); }
+      $('stressOut').innerHTML = parts.join('<br>');
+    }
   }
 
   /* ---------------- temperaturno polje (canvas) ---------------- */
@@ -960,7 +965,7 @@
     const cellErr = (base, loo) => Number.isFinite(loo) ? `<td class="${loo < base ? 'good' : 'bad'}">${fmt(loo, 1)}</td>` : '<td>–</td>';
     if (f.t85) rows.push(`<tr><td>t8/5</td><td>${f.t85.n}</td><td>izmjereno = ${fmt(f.t85.c, 3)} · predviđeno</td><td>${fmt(f.t85.maeBase, 1)} s</td>${cellErr(f.t85.maeBase, f.t85.maeLoo)}<td>${f.t85.useful ? 'da' : 'ne'}</td></tr>`);
     if (f.hv) rows.push(`<tr><td>Tvrdoća ZUT-a</td><td>${f.hv.n}</td><td>${f.hv.model === 'pravac' ? `HV = ${fmt(f.hv.a, 1)} + ${fmt(f.hv.b, 3)} · HVpred` : `HV = HVpred ${f.hv.a >= 0 ? '+' : '−'} ${fmt(Math.abs(f.hv.a), 1)}`}</td><td>${fmt(f.hv.maeBase, 1)} HV</td>${cellErr(f.hv.maeBase, f.hv.maeLoo)}<td>${f.hv.useful ? 'da' : 'ne'}</td></tr>`);
-    if (fw) rows.push(`<tr><td>Indeks rizika (težine uzroka)</td><td>${fw.n} (${fw.n1} s greškom)</td><td>težine u tablici ispod</td><td>${fmt(fw.brierBase, 3)}</td><td class="${fw.brierLoo < fw.brierBase ? 'good' : 'bad'}">${Number.isFinite(fw.brierLoo) ? fmt(fw.brierLoo, 3) : '–'}</td><td>${fw.useful ? 'da' : 'ne'}</td></tr>`);
+    if (fw) rows.push(`<tr><td>Indeks rizika (težine uzroka)</td><td>${fw.n} (${fw.n1} s greškom)</td><td>težine u tablici ispod ove</td><td>${fmt(fw.brierBase, 3)}</td><td class="${fw.brierLoo < fw.brierBase ? 'good' : 'bad'}">${Number.isFinite(fw.brierLoo) ? fmt(fw.brierLoo, 3) : '–'}</td><td>${fw.useful ? 'da' : 'ne'}</td></tr>`);
     $('mlTable').innerHTML = rows.length ? `<tr><th>Veličina</th><th>Zapisa</th><th>Naučeni model</th><th>Pogreška bez korekcije</th><th>Pogreška s korekcijom (LOO)</th><th>Korisna</th></tr>${rows.join('')}` : '';
     renderWeights();
     const corr = mlCorr() || mlWeights();
@@ -974,7 +979,7 @@
   function renderWeights() {
     const fw = ML.fitW, on = ML.use && !!mlWeights();
     const lab = { hv: 'Tvrdoća ZUT-a', slow: 'Presporo hlađenje', pre: 'Hladniji od predgrijavanja', cond: 'Kondenzacija vlage', hot: 'Topliji od dopuštenog', restr: 'Ukliještenost' };
-    $('wTable').innerHTML = '<tr><th>Uzrok</th><th>Stručna procjena</th><th>Naučeno iz dnevnika</th></tr>' + W.CAUSE_IDS.map(id =>
+    $('wTable').innerHTML = $('wTable2').innerHTML = '<tr><th>Uzrok</th><th>Stručna procjena</th><th>Naučeno iz dnevnika</th></tr>' + W.CAUSE_IDS.map(id =>
       `<tr><td>${lab[id]}</td><td>${fmt(W.W0[id], 2)}</td><td>${fw ? (fw.used[id] ? `<b>${fmt(fw.w[id], 2)}</b>` : '<span class="muted">nema podataka</span>') : '–'}</td></tr>`).join('');
     $('wNote').textContent = !fw ? 'Kad u dnevnik upišeš nalaze ispitivanja (stupac "Greške"), ovdje se prikazuju težine naučene iz njih.'
       : on ? `U procjeni se koriste težine naučene iz ${fw.n} zapisa.`
@@ -1745,13 +1750,25 @@ Pravila:
     });
     return out.sort((p, q) => p[0] - q[0]);
   }
+  // Vrsta rezultata iz zaglavlja (y_mm;sigma_x… ili x_mm;sigma_y…), a bez zaglavlja iz podataka:
+  // poprečni profil ima negativne udaljenosti (obje strane zavara), profil duž zavara samo pozitivne
+  function femKindOf(text, pts) {
+    const head = text.replace(/^\ufeff/, '').split(/\r?\n/)[0].toLowerCase();
+    if (/sigma_?x|σx|sx\b/.test(head) || /^\s*y/.test(head)) return 'x';
+    if (/sigma_?y|σy|sy\b/.test(head) || /^\s*x/.test(head)) return 'y';
+    return pts.some(q => q[0] < 0) ? 'x' : 'y';
+  }
   $('femFile').addEventListener('change', async ev => {
-    const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
-    const pts = parseTwoCols(await f.text());
-    const kind = $('femKind').value;
-    if (pts.length < 3) { $('femStatus').textContent = `U "${f.name}" nisu pronađena barem tri retka s dva broja.`; return; }
-    FEM[kind] = pts;
-    $('femStatus').textContent = `Učitano ${pts.length} točaka iz "${f.name}" (${kind === 'x' ? 'uzdužni profil σx' : 'σy duž zavara'}).`;
+    const files = [...ev.target.files]; ev.target.value = ''; if (!files.length) return;
+    const msgs = [];
+    for (const f of files) {
+      const text = await f.text(), pts = parseTwoCols(text);
+      if (pts.length < 3) { msgs.push(`U "${f.name}" nisu pronađena barem tri retka s dva broja.`); continue; }
+      const kind = femKindOf(text, pts);
+      FEM[kind] = pts;
+      msgs.push(`"${f.name}": ${pts.length} točaka, ${kind === 'x' ? 'uzdužno naprezanje σx preko zavara' : 'poprečno naprezanje σy duž zavara'}.`);
+    }
+    $('femStatus').textContent = 'Učitano: ' + msgs.join(' ');
     if (P) renderStress();
   });
   $('femClear').addEventListener('click', () => { FEM.x = null; FEM.y = null; $('femStatus').textContent = 'Učitani rezultati su uklonjeni.'; if (P) renderStress(); });

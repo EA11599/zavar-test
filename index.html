@@ -337,9 +337,17 @@
     <h3 class="sh" style="border-top:1px solid var(--line);margin-top:14px">Poprečna naprezanja σy, duž zavara</h3>
     <div class="chartbox"><svg id="stressT" viewBox="0 0 760 290" role="img" aria-label="Poprečna zaostala naprezanja duž zavara"></svg></div>
     <p class="readout" id="stressOut"></p>
-    <div class="ccxgen noprint">
-      <b>Model za CalculiX</b>
-      <p class="hint" style="margin:4px 0 8px">Iz trenutnih ulaza izrađuje ulazne datoteke za MKE analizu sučeljenog spoja: toplinsku (pomični Goldakov izvor) i mehaničku (zaostala naprezanja).</p>
+    <div class="fem noprint">
+      <b>Rezultati iz CalculiX-a</b>
+      <div class="row" style="margin-top:8px">
+        <label class="filebtn">Učitaj rezultate (CSV)<input type="file" id="femFile" accept=".csv,.txt,text/csv,text/plain" class="sr" multiple></label>
+        <button type="button" class="ghost" id="femClear">Ukloni učitano</button>
+      </div>
+      <p class="hint" id="femStatus" role="status">Odaberi profil_sx.csv, profil_sy.csv ili obje odjednom. Stranica iz zaglavlja prepoznaje radi li se o uzdužnom (σx) ili poprečnom (σy) naprezanju.</p>
+    </div>
+    <details class="ccxgen noprint">
+      <summary>Izradi vlastiti proračun u CalculiX-u</summary>
+      <p class="hint" style="margin:4px 0 8px">Iz trenutnih ulaza izrađuje ulazne datoteke za MKE analizu sučeljenog spoja: toplinsku (pomični Goldakov izvor) i mehaničku (zaostala naprezanja). Rezultate zatim učitaš gumbom iznad.</p>
       <div class="fields">
         <label>Gustoća mreže
           <select id="ccxMesh"><option value="gruba" selected>Gruba (brza provjera)</option><option value="srednja">Srednja</option><option value="fina">Fina</option></select>
@@ -364,16 +372,7 @@
         <p><b>Svojstva materijala</b> ovisna o temperaturi računaju se izrazima iz EN 1993-1-2 [7] za ugljični čelik: toplinska vodljivost, specifični toplinski kapacitet (s vrhom na 735 °C), toplinsko produljenje te faktori smanjenja granice tečenja k<sub>y</sub> i modula elastičnosti k<sub>E</sub>, pomnoženi s upisanim Re. Norma vrijedi do 1200 °C. Iznad toga, kao i najmanja krutost i čvrstoća (5 %) te očvršćenje od 10 %, vrijednosti su numeričke pretpostavke. Faktor k<sub>y</sub> u normi odgovara deformaciji od 2 % (proračun na požar), pa za zavarivanje daje nešto višu granicu tečenja između 200 i 400 °C od vrijednosti za 0,2 %.</p>
         <p>Preporuka za prvi proračun je gruba mreža i kraći zavar (npr. L = 200 mm, B = 120 mm), što na običnom računalu traje nekoliko minuta. Procjena trajanja prilagođena je na 37 proračuna na računalu s dvije jezgre; na bržem računalu proračun je kraći.</p>
       </details>
-    </div>
-    <div class="fem noprint">
-      <b>Rezultati iz CalculiX-a</b>
-      <div class="row" style="margin-top:8px">
-        <select id="femKind" aria-label="Vrsta podataka"><option value="x">Uzdužni profil: y (mm), σx (MPa)</option><option value="y">Duž zavara: x (mm), σy (MPa)</option></select>
-        <label class="filebtn">Učitaj CSV<input type="file" id="femFile" accept=".csv,.txt,text/csv,text/plain" class="sr"></label>
-        <button type="button" class="ghost" id="femClear">Ukloni učitano</button>
-      </div>
-      <p class="hint" id="femStatus" role="status">Dva stupca: udaljenost u mm i naprezanje u MPa. Razdjelnik može biti točka-zarez, zarez, tabulator ili razmak.</p>
-    </div>
+    </details>
     <details class="how"><summary>Kako se računaju modeli</summary>
       <p><b>Masubuchi i Martin</b> [11]. Oblik raspodjele je samouravnotežen po širini ploče:</p>
       <div class="f">σₓ(y) = σₘ · [1 − (y/b)²] · exp[−½ (y/b)²]</div>
@@ -480,6 +479,9 @@
     </div>
     <div class="tablewrap" style="padding:8px 18px 0"><table class="t" id="mlTable"></table></div>
     <p class="readout" id="mlOut" style="padding-top:10px"></p>
+    <h3 class="sh" style="border-top:1px solid var(--line)">Težine uzroka u indeksu rizika</h3>
+    <div class="tablewrap" style="padding:0 18px"><table class="t" id="wTable2"></table></div>
+    <p class="hint" style="padding:0 18px 12px">Ista tablica nalazi se na kartici Procjena, u napomeni "Kako nastaje indeks rizika".</p>
     <details class="how"><summary>Kako program uči</summary>
       <p>Iz zapisa u dnevniku s izmjerenim vrijednostima program uči dvije korekcije modela:</p>
       <ul>

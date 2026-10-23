@@ -11,11 +11,11 @@
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
     --bg:#12181E; --panel:#1A222A; --ink:#E3E8EC; --muted:#97A4AE; --line:#2F3B46; --plate:#3E4952; --soft:#151C23;
-    --blue:#6E9BD6; --ok:#6DB388; --warn:#D39456; --bad:#E07A7A; color-scheme:dark;
+    --blue:#6E9BD6; --ok:#6DB388; --warn:#D39456; --bad:#E07A7A; --violet:#B48BC9; color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
-  --bg:#12181E; --panel:#1A222A; --ink:#E3E8EC; --muted:#97A4AE; --line:#2F3B46; --plate:#3E4952; --soft:#151C23;
+  --bg:#12181E; --panel:#1A222A; --ink:#E3E8EC; --muted:#97A4AE; --line:#2F3B46; --plate:#3E4952; --soft:#151C23; --violet:#B48BC9;
   --blue:#6E9BD6; --ok:#6DB388; --warn:#D39456; --bad:#E07A7A; color-scheme:dark;
 }
 *,*::before,*::after{box-sizing:inherit}
@@ -226,3 +226,8 @@ table.assume{min-width:520px}
 .tag{display:inline-block;font-size:.72rem;font-weight:600;color:var(--violet);border:1px solid var(--violet);padding:0 5px;margin-left:4px;vertical-align:1px}
 @media (max-width:480px){ol.guide{gap:6px}ol.guide span{display:none}ol.guide li::before{font-size:1.2rem;top:0}}
 #verNote{margin:0 0 10px}
+details.ccxgen{padding:0 18px;border-top:1px dashed var(--line)}
+details.ccxgen > summary{cursor:pointer;font-weight:600;padding:12px 0;color:var(--ink)}
+details.ccxgen[open]{padding-bottom:14px}
+#ccxMesh{min-width:200px}
+.fem{border-top:1px dashed var(--line)}
