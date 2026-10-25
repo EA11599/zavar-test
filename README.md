@@ -1,4 +1,4 @@
-# Provjera parametara zavarivanja – demo
+# Zaostala naprezanja u zavarenim spojevima – demo
 
 Prototip web-aplikacije za diplomski rad: procjena rizika od grešaka i zaostalih naprezanja u zavarenom spoju na temelju stvarnih uvjeta na radnom mjestu i parametara zavarivanja, uz prijedlog korekcije parametara.
 

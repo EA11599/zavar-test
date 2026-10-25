@@ -85,7 +85,7 @@
     REC = W.recommend(p, { coupleU: p.coupleU });
     ST = W.stressProfile(p, p.T0);
     if (probeAuto) probeY = Math.max(0.5, W.distanceForPeak(p, 1350, p.T0));
-    renderInSum(); renderSummary(); renderReco(); renderSurrogate(); renderStress(); renderCycle(); renderCompare(); renderPW(); renderCcx();
+    renderInSum(); renderSummary(); renderReco(); renderSurrogate(); renderStKey(); renderStress(); renderCycle(); renderCompare(); renderPW(); renderCcx();
     fieldStateDirty = true;
     if (!playing) drawField();
   }
@@ -98,6 +98,7 @@
     $('reco').innerHTML = '<p class="note">Preporuka će se prikazati kad su svi ulazni podaci ispravni.</p>';
     ['cycle', 'stress', 'stressT', 'chart', 'stressTable'].forEach(id => { $(id).innerHTML = ''; });
     $('cycleOut').textContent = ''; $('stressOut').textContent = ''; $('dA').innerHTML = ''; $('dB').innerHTML = '';
+    $('stKey').innerHTML = ''; $('stSide').innerHTML = ''; $('stKeyNote').textContent = msg;
     const c = $('pw').getContext('2d'); c.clearRect(0, 0, 760, 420);
   }
 
@@ -914,7 +915,7 @@
     const b = ev.target.closest('button'); if (!b) return;
     const tr = b.closest('tr'); const r = LOG.find(x => x.id === tr.dataset.id); if (!r) return;
     if (b.dataset.act === 'del') { logDelete([r.id]).then(ok => { if (ok) msg('Zapis je obrisan.'); }); }
-    if (b.dataset.act === 'load') { loadEntry(r); msg(`Ulazi zapisa ${r.oznaka || ''} učitani su u obrazac.`); go('procjena'); }
+    if (b.dataset.act === 'load') { loadEntry(r); msg(`Ulazi zapisa ${r.oznaka || ''} učitani su u obrazac.`); go('ulazi'); }
   });
 
   function loadEntry(r) {
@@ -1866,17 +1867,40 @@ Pravila:
   }
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { fieldStateDirty = true; if (P) render(); });
 
+  /* ---------------- prva kartica: ključne vrijednosti naprezanja ---------------- */
+  function renderStKey() {
+    const box = (v, unit, lab, sub) => `<div class="metric"><b>${v}${unit ? ' <small>' + unit + '</small>' : ''}</b><span>${lab}${sub ? '<br>' + sub : ''}</span></div>`;
+    const M = W.stressModels(P, P.T0);
+    if (SU.pred) {
+      const o = SU.pred.out, iv = (q, d) => `95 % interval ${fmt(q.vlo, d)} do ${fmt(q.vup, d)}`;
+      $('stKey').innerHTML = box(fmt(o.sxMax.val, 0), 'MPa', 'najveće uzdužno naprezanje σx', iv(o.sxMax, 0)) +
+        box('±' + fmt(o.b0.val, 1), 'mm', 'širina vlačne zone (od osi zavara)', iv(o.b0, 1)) +
+        box(fmt(o.syMid.val, 0), 'MPa', 'poprečno naprezanje σy u sredini zavara', iv(o.syMid, 0));
+      const rel = 100 * o.sxMax.val / P.Re;
+      let note = `Surogatni model naučen na proračunima u CalculiX-u. Najveće naprezanje iznosi ${fmt(rel, 0)} % granice tečenja i nalazi se u ZUT-u, nekoliko milimetara od osi zavara; u samom zavaru je niže. ` +
+        `Analitički model Masubuchija i Martina daje ${fmt(M.MM.peak, 0)} MPa i vlačnu zonu ±${fmt(M.MM.b, 1)} mm.`;
+      if ($('suWarn').textContent) note += ` <span class="warnline" style="display:inline">${esc($('suWarn').textContent)}</span>`;
+      $('stKeyNote').innerHTML = note;
+    } else {
+      $('stKey').innerHTML = box(fmt(M.MM.peak, 0), 'MPa', 'najveće uzdužno naprezanje σx', 'analitički model') +
+        box('±' + fmt(M.MM.b, 1), 'mm', 'širina vlačne zone', 'Masubuchi i Martin') + box(fmt(M.TR.at(P.L / 2), 0), 'MPa', 'σy u sredini zavara', 'analitički model');
+      $('stKeyNote').textContent = SU.err || '';
+    }
+    $('stSide').innerHTML = box(fmt(E.Q, 2), 'kJ/mm', 'unos topline') + box(fmt(E.t85, 1), 's', 't8/5 (EN 1011-2)') +
+      box(String(Math.round(E.HV)), 'HV', 'najveća tvrdoća ZUT-a') + box(String(Math.round(E.risk)), '', 'indeks rizika od grešaka', verdict(E.risk)[0]);
+  }
+
   /* ---------------- stranice (kartice) ---------------- */
   // Svaka kartica je <div class="tab">; adresa (#polje, #dnevnik…) bira karticu, a dublja sidra (#prozor) i mjesto na njoj.
-  const TAB_ROOTS = { procjena: 't-procjena', polje: 't-toplina', naprezanja: 't-naprezanja', surogat: 't-surogat', dnevnik: 't-dnevnik', plan: 't-orad' };
+  const TAB_ROOTS = { naprezanja: 't-naprezanja', surogat: 't-surogat', polje: 't-toplina', dnevnik: 't-dnevnik', procjena: 't-rizik', plan: 't-orad' };
   function route() {
-    const h = decodeURIComponent(location.hash.slice(1)) || 'procjena';
+    const h = decodeURIComponent(location.hash.slice(1)) || 'naprezanja';
     let el = document.getElementById(h);
     let tab = el ? (el.classList.contains('tab') ? el : el.closest('.tab')) : null;
-    if (!tab) { tab = $('t-procjena'); el = null; }
+    if (!tab) { tab = $('t-naprezanja'); el = null; }
     document.querySelectorAll('.tab').forEach(t => { t.hidden = t !== tab; });
     document.querySelectorAll('nav.tabs a').forEach(a => { if (a.dataset.tab === tab.id) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
-    $('inSum').hidden = tab.id === 't-procjena';
+    $('inSum').hidden = tab.id === 't-naprezanja';
     // preglednik nakon promjene adrese sam skoči na sidro; to se poništava u sljedećem okviru
     requestAnimationFrame(() => { if (el && !TAB_ROOTS[h]) el.scrollIntoView({ behavior: 'auto', block: 'start' }); else window.scrollTo(0, 0); });
     fieldStateDirty = true; lastT = 0;
@@ -1886,9 +1910,9 @@ Pravila:
   window.addEventListener('hashchange', route);
   // sažetak ulaza na ostalim karticama
   function renderInSum() {
-    if (!P) { $('inSum').innerHTML = 'Ulazni podaci nisu potpuni. <a href="#procjena">Ispravi ih na kartici Procjena</a>.'; return; }
+    if (!P) { $('inSum').innerHTML = 'Ulazni podaci nisu potpuni. <a href="#ulazi">Ispravi ih na prvoj kartici</a>.'; return; }
     $('inSum').innerHTML = `${esc(P.mat)}, ${fmt(P.d, 0)} mm, ${P.joint === 'butt' ? 'sučeljeni spoj' : 'kutni spoj'}; ${P.proc} ${fmt(P.I, 0)} A, ${fmt(P.U, 1)} V, ${fmt(P.v, 0)} cm/min; ` +
-      `komad ${fmt(P.T0, 0)} °C. <a href="#procjena">Promijeni ulaze</a>`;
+      `komad ${fmt(P.T0, 0)} °C. <a href="#ulazi">Promijeni ulaze</a>`;
   }
 
   /* ---------------- pokretanje ---------------- */

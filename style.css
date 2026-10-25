@@ -231,3 +231,7 @@ details.ccxgen > summary{cursor:pointer;font-weight:600;padding:12px 0;color:var
 details.ccxgen[open]{padding-bottom:14px}
 #ccxMesh{min-width:200px}
 .fem{border-top:1px dashed var(--line)}
+.metric b small{font-size:.9rem;font-weight:600;color:var(--muted)}
+a.btnlink{font-weight:600;color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:7px 12px;text-decoration:none;font-size:.95rem}
+a.btnlink:hover{border-color:var(--ink)}
+#t-rizik .grid2{align-items:start}
