@@ -10,6 +10,10 @@
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Broj iz polja: prihvaća decimalni zarez i točku (polja su tekstualna, pa preglednik ne izbacuje zarez)
+  const numv = s => { const t = String(s ?? '').trim().replace(/\s+/g, '').replace(/−/g, '-').replace(',', '.'); return t === '' || !/^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(t) ? NaN : Number(t); };
+  // hrvatska množina: 1 zapis, 2–4 zapisa, 5+ zapisa (11–14 zapisa)
+  const plural = (n, one, few, many) => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; };
 
   function hexRgb(h) {
     h = h.replace('#', '');
@@ -27,10 +31,14 @@
     $('tmin').value = m.tmin; $('tmax').value = m.tmax; $('Tmax').value = m.Tmax;
     CHEM.forEach(k => { $('c' + k).value = m.comp[k]; });
   }
-  function applyProcess() { $('HD').value = String(W.HD_DEFAULT[$('proc').value]); }
+  function applyProcess() {
+    const pr = $('proc').value; $('HD').value = String(W.HD_DEFAULT[pr]);
+    const I = numv($('I').value), L = W.ULINE[pr];
+    if (Number.isFinite(I) && L) $('U').value = String(Math.round((L.a + L.b * I) * 2) / 2).replace('.', ',');   // uobičajeni napon za tu struju
+  }
 
   function read() {
-    const g = id => parseFloat($(id).value);
+    const g = id => numv($(id).value);
     const comp = {}; CHEM.forEach(k => { comp[k] = g('c' + k); });
     return {
       T0: g('T0'), Ta: g('Ta'), RH: g('RH'), Re: g('Re'), d: g('d'), joint: $('joint').value,
@@ -54,17 +62,29 @@
     if (p.B < 20 || p.L < 20) return 'Širina ploča i duljina zavara moraju biti barem 20 mm.';
     if (p.RH < 1 || p.RH > 100) return 'Relativna vlažnost mora biti između 1 i 100 %.';
     if (p.T0 >= 450) return 'Temperatura komada mora biti ispod 450 °C.';
+    if (p.T0 < -40) return 'Temperatura komada mora biti barem −40 °C.';
+    if (p.d < 2 || p.d > 150) return 'Debljina lima mora biti između 2 i 150 mm.';
+    if (p.I < 30 || p.I > 1000) return 'Struja mora biti između 30 i 1.000 A.';
+    if (p.U < 8 || p.U > 60) return 'Napon mora biti između 8 i 60 V.';
+    if (p.v < 2 || p.v > 300) return 'Brzina zavarivanja mora biti između 2 i 300 cm/min.';
+    if (p.Re < 150 || p.Re > 1300) return 'Granica tečenja mora biti između 150 i 1.300 MPa.';
     if (p.tmin >= p.tmax) return 'Ciljani t8/5 "od" mora biti manji od "do".';
     return null;
   }
 
   /* ---------------- stanje ---------------- */
   let P = null, E = null, REC = null, ST = null, SM = null;
-  const MC = { pts: null, name: '', stats: null };        // učitani (izmjereni ili simulirani) toplinski ciklus
+  const MC = { pts: null, name: '', stats: null, sig: '' };        // učitani (izmjereni ili simulirani) toplinski ciklus
   const KCAL = { k: NaN, on: false, from: '' };           // kalibrirana toplinska iskoristivost
   const ML = { fit: null, fitW: null, use: false, demo: false };      // naučene korekcije iz dnevnika
-  const FEM = { x: null, y: null };
+  const FEM = { x: null, y: null, sig: '' };
+  // potpis ulaza za koje su učitani vanjski rezultati; ako se ulazi promijene, rezultati više ne odgovaraju
+  const sigFem = p => p ? [p.Re, p.d, p.B, p.L, p.I, p.U, p.v, p.T0, p.proc, p.joint, p.restr].join('|') : '';
+  const sigCyc = p => p ? [p.d, p.B, p.L, p.I, p.U, p.v, p.T0, p.proc, p.joint].join('|') : '';
+  const femStale = () => !!(FEM.sig && P && FEM.sig !== sigFem(P));
+  const mcStale = () => !!(MC.sig && P && MC.sig !== sigCyc(P));
   let CERT = null;   // podaci iz potvrđenog certifikata
+  let LOADMISS = [];  // polja koja nedostaju u zapisu učitanom iz dnevnika
   let probeY = 3, probeAuto = true;
   let pwMode = 'meas';
 
@@ -85,7 +105,7 @@
     REC = W.recommend(p, { coupleU: p.coupleU });
     ST = W.stressProfile(p, p.T0);
     if (probeAuto) probeY = Math.max(0.5, W.distanceForPeak(p, 1350, p.T0));
-    renderInSum(); renderSummary(); renderReco(); renderSurrogate(); renderStKey(); renderStress(); renderCycle(); renderCompare(); renderPW(); renderCcx();
+    renderInSum(); renderSurrogate(); renderSummary(); renderReco(); renderStKey(); renderStress(); renderCycle(); renderCompare(); renderPW(); renderCcx();
     fieldStateDirty = true;
     if (!playing) drawField();
   }
@@ -120,7 +140,10 @@
     if (e.TpCET <= 0) { $('mTp').textContent = '0'; $('mTpl').textContent = 'potrebno predgrijavanje (CET), °C: nije potrebno'; }
     else { $('mTp').textContent = Math.round(e.TpCET); $('mTpl').textContent = 'potrebno predgrijavanje (CET), °C'; }
     $('mDew').textContent = fmt(e.Td, 1);
-    $('mB').textContent = fmt(2 * ST.b, 0);
+    // ista vrijednost kao na prvoj kartici: surogatni model ako postoji, inače Masubuchi i Martin
+    const bSu = SU.pred ? SU.pred.out.b0.val : NaN;
+    $('mB').textContent = '±' + fmt(Number.isFinite(bSu) ? bSu : W.stressModels(p, p.T0).MM.b, 1);
+    $('mBl').textContent = 'širina vlačne zone od osi zavara, mm (' + (Number.isFinite(bSu) ? 'surogatni model' : 'Masubuchi i Martin') + ')';
     $('cetWarn').textContent = e.cetWarn.length ? 'Izraz za predgrijavanje primijenjen izvan područja valjanosti: ' + e.cetWarn.join(', ') + '.' : '';
     $('ceOut').innerHTML = `CE = <b>${fmt(e.CE, 2)}</b>, CET = <b>${fmt(e.CET, 2)}</b>, skupina materijala ${p.group}` +
       (CERT && Number.isFinite(CERT.cev) ? `; CEV s certifikata = <b>${fmt(CERT.cev, 2)}</b>${Math.abs(CERT.cev - e.CE) > 0.02 ? ' (razlika od izračunatog veća od 0,02: provjeri sastav)' : ''}` : '');
@@ -145,7 +168,7 @@
     const Ir = Math.round(q.I / 5) * 5;
     $('reco').innerHTML = `<div class="tablewrap"><table class="t">
       <tr><th>Veličina</th><th>Sada</th><th>Preporuka</th></tr>
-      ${row(q.T0 > p.T0 ? 'Temperatura komada (predgrijati na)' : 'Temperatura komada', p.T0, q.T0, '°C')}
+      ${row(q.T0 > p.T0 ? 'Temperatura komada (predgrijati na)' : q.T0 < p.T0 ? 'Temperatura komada (ohladiti na)' : 'Temperatura komada', p.T0, q.T0, '°C')}
       ${row('Struja', p.I, Ir, 'A')}
       ${row('Napon', p.U, q.U, 'V', 1)}
       ${row('Brzina zavarivanja', p.v, q.v, 'cm/min')}
@@ -157,8 +180,10 @@
       <p class="note">Unos topline ostaje unutar ±25 % WPS-a. Prije primjene provjeri je li preporuka unutar granica odobrenog WPS-a.</p>
       <div class="row noprint" style="margin-top:12px"><button type="button" id="apply">Primijeni preporuku</button></div>`;
     $('apply').onclick = () => {
-      $('T0').value = q.T0; $('I').value = Ir; $('U').value = Math.round(q.U * 2) / 2; $('v').value = Math.round(q.v);
+      const T0changed = q.T0 !== p.T0;
+      $('T0').value = q.T0; $('I').value = Ir; $('U').value = String(Math.round(q.U * 2) / 2).replace('.', ','); $('v').value = Math.round(q.v);
       render();
+      if (T0changed) $('reco').insertAdjacentHTML('afterbegin', `<p class="warnline">Temperatura komada ${fmt(q.T0, 0)} °C sada je planirana vrijednost. Prije zavarivanja izmjeri stvarnu temperaturu i upiši je.</p>`);
     };
   }
 
@@ -229,7 +254,7 @@
   /* ---------------- učitani toplinski ciklus i kalibracija k ---------------- */
   function renderMeasured() {
     if (!MC.pts || !MC.stats || !P) { $('mcOut').innerHTML = ''; return; }
-    const y = parseFloat($('mcY').value);
+    const y = numv($('mcY').value);
     const st = MC.stats;
     const pBase = { ...P, kEff: undefined };
     const model = Number.isFinite(y) ? W.thermalCycle(P, y, P.T0, clamp(3 * (st.t85 || E.t85) + 40, 40, 400)) : null;
@@ -238,7 +263,8 @@
       row('Vršna temperatura', st.peak, model && Math.min(model.peak, 3000), '°C', 0) +
       row('t8/5', st.t85, model && model.t85, 's', 1) + '</table></div>' +
       `<p class="note">Za usporedbu, t8/5 prema EN 1011-2 iznosi ${fmt(E.t85, 1)} s. Rosenthal raspoređuje toplinu po cijeloj debljini, pa uz površinu daje niže vršne temperature od stvarnih; t8/5 se u ZUT-u s udaljenošću mijenja malo.</p>`;
-    if (!Number.isFinite(st.t85)) h += '<p class="warnline">Učitani ciklus ne prolazi kroz 800 i 500 °C, pa t8/5 i kalibracija nisu mogući.</p>';
+    if (mcStale()) h = '<p class="warnline">Ciklus je učitan uz druge ulaze (struja, napon, brzina, debljina, temperatura komada…) nego što su sada upisani, pa usporedba i kalibracija ne vrijede za trenutne ulaze.</p>' + h;
+    if (!Number.isFinite(st.t85)) h += `<p class="warnline">Učitani ciklus ne prolazi kroz 800 i 500 °C (vrh ${fmt(st.peak, 0)} °C), pa t8/5 i kalibracija nisu mogući. Kalibracija treba ciklus iz ZUT-a s vrhom iznad 800 °C, najbolje oko 1.000 do 1.350 °C.</p>`;
     else {
       h += `<div class="row" style="margin-top:10px"><button type="button" id="mcCal">Kalibriraj k prema ovom ciklusu</button>` +
         (KCAL.on ? `<button type="button" class="ghost" id="mcReset">Vrati k iz norme (${fmt(W.K[P.proc], 1)})</button>` : '') + '</div>';
@@ -251,6 +277,7 @@
       const r = W.calibrateK(pBase, y, st.t85, P.T0);
       if (!Number.isFinite(r.k)) { $('mcStatus').textContent = 'Kalibracija nije moguća: ' + r.reason + '.'; return; }
       Object.assign(KCAL, { k: r.k, on: false, note: r.reason || '', from: MC.name });
+      $('mcStatus').textContent = '';
       renderMeasured();
     };
     if (b2) b2.onclick = () => { KCAL.on = false; render(); };
@@ -271,21 +298,31 @@
   }
   $('mcFile').addEventListener('change', async ev => {
     const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
-    const pts = parseTwoColsTime(await f.text());
-    if (pts.length < 5) { $('mcStatus').textContent = `U "${f.name}" nije pronađeno barem 5 redaka s vremenom i temperaturom.`; return; }
-    Object.assign(MC, { pts, name: f.name, stats: W.cycleStats(pts) });
+    const text = await f.text(); let pts = parseTwoColsTime(text);
+    const keep = MC.pts ? ' Prethodno učitani ciklus ostaje.' : '';
+    if (pts.length < 5) { $('mcStatus').textContent = `U "${f.name}" nije pronađeno barem 5 redaka s vremenom i temperaturom.` + keep; return; }
+    const head = text.replace(/^\ufeff/, '').split(/\r?\n/)[0].toLowerCase().split(/[;,\t]|\s+/).filter(Boolean);
+    const notes = [];
+    // zamijenjeni stupci: zaglavlje kaže da je temperatura prva
+    const isTemp = h => /temp|°|^t_?(c|k)$|\((c|k|°c)\)/.test(h), isTime = h => /vrij|time|^t_?s$|\(s\)|^s$/.test(h);
+    if (head.length >= 2 && isTemp(head[0]) && isTime(head[1])) {
+      pts = pts.map(q => [q[1], q[0]]).sort((u, v) => u[0] - v[0]); notes.push('stupci su zamijenjeni prema zaglavlju (prvi je bio temperatura)');
+    }
+    if (head.some(h => /\(k\)|_k\b|kelvin|^k$/.test(h))) { pts = pts.map(q => [q[0], q[1] - 273.15]); notes.push('temperature pretvorene iz K u °C'); }
+    if (pts.some(q => q[1] > 3500)) { $('mcStatus').textContent = `U "${f.name}" ima temperatura iznad 3.500 °C. Jesu li u kelvinima? U zaglavlje drugog stupca stavi "T_K" ili ih zapiši u °C.` + keep; return; }
+    Object.assign(MC, { pts, name: f.name, stats: W.cycleStats(pts), sig: sigCyc(P) });
     KCAL.k = NaN;
-    const y = parseFloat($('mcY').value);
+    const y = numv($('mcY').value);
     if (Number.isFinite(y)) { probeY = y; probeAuto = false; }
-    $('mcStatus').textContent = `Učitano ${pts.length} točaka iz "${f.name}". Upiši udaljenost točke mjerenja od osi zavara.`;
+    $('mcStatus').textContent = `Učitano ${pts.length} ${plural(pts.length, 'točka', 'točke', 'točaka')} iz "${f.name}"${notes.length ? ' (' + notes.join('; ') + ')' : ''}. Upiši udaljenost točke mjerenja od osi zavara.`;
     if (P) { renderCycle(); if (!playing) drawField(); }
   });
   $('mcY').addEventListener('input', () => {
-    const y = parseFloat($('mcY').value);
+    const y = numv($('mcY').value);
     if (MC.pts && Number.isFinite(y) && y > 0) { probeY = y; probeAuto = false; KCAL.k = KCAL.on ? KCAL.k : NaN; if (P) { renderCycle(); if (!playing) drawField(); } }
   });
   $('mcClear').addEventListener('click', () => {
-    Object.assign(MC, { pts: null, name: '', stats: null });
+    Object.assign(MC, { pts: null, name: '', stats: null, sig: '' });
     $('mcStatus').textContent = 'Učitani ciklus je uklonjen.' + (KCAL.on ? ' Kalibrirani k ostaje primijenjen dok ga ne vratiš na vrijednost iz norme.' : '');
     if (P) renderCycle();
   });
@@ -319,7 +356,7 @@
     if (showSU) {
       const prof = window.SUR.profile(SU.pred), q = SU.pred.out.sxMax, violet = css('--violet');
       const band = [];
-      for (let i = 0; i <= 200; i++) { const y = -ym + 2 * ym * i / 200, f = prof(y) / q.val; band.push([y, Math.max(f * q.vlo, f * q.vup), Math.min(f * q.vlo, f * q.vup)]); }
+      for (let i = 0; i <= 200; i++) { const y = -ym + 2 * ym * i / 200, f = q.val > 1e-6 ? prof(y) / q.val : 0; band.push([y, Math.max(f * q.vlo, f * q.vup), Math.min(f * q.vlo, f * q.vup)]); }
       s += `<polygon fill="${violet}" opacity=".16" points="${band.map(r => A.X(r[0]).toFixed(1) + ',' + A.Y(r[1]).toFixed(1)).concat(band.slice().reverse().map(r => A.X(r[0]).toFixed(1) + ',' + A.Y(r[2]).toFixed(1))).join(' ')}"/>`;
       s += curve(prof, violet, 2.6, '');
     }
@@ -349,10 +386,12 @@
     if (showMM) rows.push(['Masubuchi i Martin', M.MM.peak, M.MM.b, M.MM.comp, M.MM.F]);
     if (showOK) rows.push(['Okerblom', M.OK.peak, M.OK.b, M.OK.comp, M.OK.F]);
     if (showSU) rows.push(['Surogatni model', SU.pred.out.sxMax.val, SU.pred.out.b0.val, NaN, NaN]);
-    if (femStats) rows.push(['CalculiX (učitano)', femStats.peak, femStats.b, femStats.comp, NaN]);
-    $('stressTable').innerHTML = rows.length ? `<tr><th>Model</th><th>Vrh σx, MPa</th><th>Poluširina vlačne zone b, mm</th><th>Najveći tlak, MPa</th><th>Sila skupljanja, kN</th></tr>` +
+    const stale = femStale();
+    if (femStats) rows.push([stale ? 'CalculiX (učitano za druge ulaze)' : 'CalculiX (učitano)', femStats.peak, femStats.b, femStats.comp, NaN]);
+    $('stressTable').innerHTML = rows.length ? `<tr><th>Model</th><th>Najveći σx, MPa</th><th>Poluširina vlačne zone b, mm</th><th>Najveći tlak, MPa</th><th>Sila skupljanja, kN</th></tr>` +
       rows.map(r => `<tr><td>${r[0]}</td><td>${fmt(r[1], 0)}</td><td>${fmt(r[2], 1)}</td><td>${fmt(r[3], 0)}</td><td>${Number.isFinite(r[4]) ? fmt(r[4], 0) : '–'}</td></tr>`).join('') : '';
-    $('stressWarn').textContent = showOK && M.OK.warn.length ? 'Okerblom: ' + M.OK.warn.join('; ') + '.' : '';
+    $('stressWarn').textContent = [(femX || FEM.y) && stale ? 'Učitani rezultati iz CalculiX-a izračunati su za druge ulaze nego što su sada upisani, pa usporedba s modelima ne vrijedi. Vrati ulaze ili učitaj nove rezultate.' : '',
+      showOK && M.OK.warn.length ? 'Okerblom: ' + M.OK.warn.join('; ') + '.' : ''].filter(Boolean).join(' ');
 
     // --- poprečno duž zavara ---
     const TR = M.TR, femY = FEM.y && FEM.y.length ? FEM.y : null;
@@ -376,7 +415,7 @@
     {
       const parts = [`Analitički modeli: vrh σx ≈ Re = <b>${fmt(p.Re, 0)} MPa</b> u osi zavara, vlačna zona ±${fmt(M.MM.b, 1)} mm (Masubuchi i Martin) odnosno ±${fmt(M.OK.b, 1)} mm (Okerblom), σy u sredini ≈ ${fmt(TR.at(p.L / 2), 0)} MPa.`];
       if (SU.pred) parts.push(`Surogatni model: najveći σx <b>${fmt(SU.pred.out.sxMax.val, 0)} MPa</b>, vlačna zona ±${fmt(SU.pred.out.b0.val, 1)} mm, σy u sredini <b>${fmt(SU.pred.out.syMid.val, 0)} MPa</b>.`);
-      if (femStats) parts.push(`CalculiX (učitano): najveći σx <b>${fmt(femStats.peak, 0)} MPa</b>${Number.isFinite(femStats.b) ? `, vlačna zona ±${fmt(femStats.b, 1)} mm` : ''}.`);
+      if (femStats) parts.push(`CalculiX (učitano${stale ? ' za druge ulaze' : ''}): najveći σx <b>${fmt(femStats.peak, 0)} MPa</b>${Number.isFinite(femStats.b) ? `, vlačna zona ±${fmt(femStats.b, 1)} mm` : ''}.`);
       if (femY) { const mid = femY.filter(q => Math.abs(q[0] - p.L / 2) < p.L * 0.15); if (mid.length) parts.push(`CalculiX σy u sredini zavara ≈ <b>${fmt(mid.reduce((a, q) => a + q[1], 0) / mid.length, 0)} MPa</b>.`); }
       $('stressOut').innerHTML = parts.join('<br>');
     }
@@ -497,8 +536,8 @@
     return stops[stops.length - 1][1];
   }
   function pwT0() {
-    if (pwMode === 'A') return parseFloat($('TA').value);
-    if (pwMode === 'B') return parseFloat($('TB').value);
+    if (pwMode === 'A') return numv($('TA').value);
+    if (pwMode === 'B') return numv($('TB').value);
     if (pwMode === 'reco') return REC && REC.best ? REC.best.p.T0 : P.T0;
     return P.T0;
   }
@@ -561,9 +600,10 @@
       ctx.beginPath(); ctx.moveTo(x, y - 7); ctx.lineTo(x + 7, y); ctx.lineTo(x, y + 7); ctx.lineTo(x - 7, y); ctx.closePath();
       ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
       ctx.fillStyle = '#17212B'; ctx.font = '600 12px Barlow, Arial, sans-serif';
-      ctx.fillText(q.T0 > P.T0 ? `preporuka, uz ${Math.round(q.T0)} °C` : 'preporuka', x + 15, y + 16);
+      ctx.fillText(q.T0 !== P.T0 ? `preporuka, uz ${Math.round(q.T0)} °C` : 'preporuka', x + 15, y + 16);
     }
-    $('pwReco').disabled = !(REC && REC.best && REC.best.p.T0 > P.T0);
+    $('pwReco').disabled = !(REC && REC.best && REC.best.p.T0 !== P.T0);
+    $('pwReco').title = $('pwReco').disabled ? (REC && REC.best ? 'Preporuka ne mijenja temperaturu komada, pa je karta ista kao uz izmjerenu temperaturu.' : 'Nema preporuke: trenutni parametri su prihvatljivi ili nije pronađena bolja kombinacija.') : '';
     $('pwOut').innerHTML = `Karta uz temperaturu komada <b>${fmt(T0, 0)} °C</b>. Krug je trenutna točka iz WPS-a${REC && REC.best && (pwMode === 'meas' || pwMode === 'reco') ? ', romb preporuka' : ''}.`;
   }
   pcv.addEventListener('mousemove', ev => {
@@ -595,7 +635,7 @@
     return e;
   }
   function renderCompare() {
-    const TA = parseFloat($('TA').value), TB = parseFloat($('TB').value);
+    const TA = numv($('TA').value), TB = numv($('TB').value);
     if (!Number.isFinite(TA) || !Number.isFinite(TB) || TA >= 450 || TB >= 450) {
       $('dA').innerHTML = $('dB').innerHTML = '<dt>Upiši temperaturu komada ispod 450 °C</dt><dd></dd>'; $('chart').innerHTML = ''; return;
     }
@@ -633,20 +673,26 @@
   const suFmt = (o, v) => fmt(v, o.dec);
   function renderSurrogate() {
     if (!SU.M) { $('suTable').innerHTML = ''; $('suWarn').textContent = SU.err; return; }
-    const S = window.SUR, pr = S.predict(W, SU.M, P); SU.pred = pr;
+    const S = window.SUR, pr = S.predict(W, SU.M, P); SU.pred = pr; let clipped = false;
     const row = o => {
       const q = pr.out[o.id];
-      const cellv = (v, lo, up, on) => `<td>${on ? '<b>' : ''}${suFmt(o, v)}${on ? '</b>' : ''} <span class="muted">(${suFmt(o, lo)} do ${suFmt(o, up)})</span>${on ? ' <span class="tag">odabran</span>' : ''}</td>`;
-      return `<tr><td>${o.lab}, ${o.unit}</td><td>${suFmt(o, q.ana)}</td>${cellv(q.hyb, q.lo, q.up, q.sel === 'hyb')}${cellv(q.pure, q.plo, q.pup, q.sel === 'pure')}</tr>`;
+      const cellv = (v, lo, up, on, cl) => {
+        const iv = suFmt(o, lo) === suFmt(o, up) ? `${suFmt(o, lo)}` : `${suFmt(o, lo)} do ${suFmt(o, up)}`;
+        return `<td>${on ? '<b>' : ''}${suFmt(o, v)}${on ? '</b>' : ''}${cl ? '*' : ''} <span class="muted">(${iv})</span>${on ? ' <span class="tag">odabran</span>' : ''}</td>`;
+      };
+      if (q.clip.hyb || q.clip.pure) clipped = true;
+      return `<tr><td>${o.lab}, ${o.unit}</td><td>${suFmt(o, q.ana)}</td>${cellv(q.hyb, q.lo, q.up, q.sel === 'hyb', q.clip.hyb)}${cellv(q.pure, q.plo, q.pup, q.sel === 'pure', q.clip.pure)}</tr>`;
     };
     $('suTable').innerHTML = '<tr><th>Veličina</th><th>Analitički model</th><th>Hibridni: analitički + GPR (95 % interval)</th><th>Samo GPR (95 % interval)</th></tr>' + S.OUTS.map(row).join('');
     const w = [];
-    if (pr.outside.length) w.push('Ulazi izvan raspona simulacija: ' + pr.outside.map(f => S.FEAT_LAB[f].split(',')[0]).join(', ') + '. Predviđanje se vraća prema analitičkom modelu, a nesigurnost raste.');
+    SU.clipMsg = '* Vrijednost ili interval odrezani su na fizičkoj granici (σx najviše 1,4·Re, σy najviše 1,1·Re), pa stvarni interval nije poznat.';
+    if (clipped) w.push('* Vrijednost ili interval odrezani su na fizičkoj granici (σx najviše 1,4·Re, σy najviše 1,1·Re), pa stvarni interval nije poznat.');
+    if (pr.outside.length) w.push('Ulazi izvan raspona simulacija: ' + pr.outside.map(f => S.FEAT_LAB[f].split(',')[0]).join(', ') + '. Hibridni model tada se vraća prema analitičkom, a samo GPR prema prosjeku simulacija; nesigurnost raste.');
     else if (pr.maxRel > 2) w.push('Ova kombinacija ulaza daleko je od simulacija u skupu, pa je interval širi nego inače.');
     const geo = [];
     if (P.B !== 120) geo.push(`B = ${fmt(P.B, 0)} mm`); if (P.L !== 200) geo.push(`L = ${fmt(P.L, 0)} mm`);
-    if (P.joint !== 'butt') geo.push('kutni spoj'); if (P.restr !== 'mid') geo.push('druga ukliještenost'); if (P.proc !== 'MAG') geo.push('postupak ' + P.proc);
-    if (geo.length) w.push(`Simulacije su za sučeljeni spoj, MAG, B = 120 mm, L = 200 mm i srednju ukliještenost; upisano je ${geo.join(', ')}, pa je predviđanje samo orijentacijsko.`);
+    if (P.joint !== 'butt') geo.push('kutni spoj'); if (P.restr !== 'mid') geo.push(P.restr === 'low' ? 'mala ukliještenost' : 'velika ukliještenost'); if (P.proc !== 'MAG') geo.push('postupak ' + P.proc);
+    if (geo.length) w.push(`Simulacije su za sučeljeni spoj, MAG, B = 120 mm, L = 200 mm i srednju ukliještenost; upisano je: ${geo.join(', ')}, pa je predviđanje samo orijentacijsko.`);
     $('suWarn').textContent = w.join(' ');
     renderSuCurve();
   }
@@ -677,17 +723,17 @@
     let lx = ob.L; leg.forEach(it => { s += `<line x1="${lx}" x2="${lx + 22}" y1="14" y2="14" stroke="${it[1]}" stroke-width="3" ${it[2] ? `stroke-dasharray="${it[2]}"` : ''}/><text x="${lx + 28}" y="18" style="fill:${ink}">${it[0]}</text>`; lx += 50 + it[0].length * 7; });
     $('suCurve').innerHTML = s;
     const a = pts.find(q => q.T >= T1), b = [...pts].reverse().find(q => q.T <= T2);
-    $('suCurveOut').innerHTML = `Uz ostale ulaze nepromijenjene, od ${fmt(a.T, 0)} do ${fmt(b.T, 0)} °C surogatni model daje ${o.lab.charAt(0).toLowerCase() + o.lab.slice(1)} od <b>${suFmt(o, a.h)}</b> do <b>${suFmt(o, b.h)} ${o.unit}</b>, a analitički od ${suFmt(o, a.a)} do ${suFmt(o, b.a)} ${o.unit}.`;
+    $('suCurveOut').innerHTML = `Uz ostale ulaze nepromijenjene, između ${fmt(a.T, 0)} i ${fmt(b.T, 0)} °C veličina „${o.lab.charAt(0).toLowerCase() + o.lab.slice(1)}“ prema surogatnom modelu mijenja se od <b>${suFmt(o, a.h)}</b> do <b>${suFmt(o, b.h)} ${o.unit}</b>, a prema analitičkom od ${suFmt(o, a.a)} do ${suFmt(o, b.a)} ${o.unit}.`;
   }
   function renderSuValidation() {
     if (!SU.M) { $('suCV').innerHTML = ''; $('suCVNote').textContent = SU.err; return; }
     const S = window.SUR, M = SU.M;
-    $('suCV').innerHTML = '<tr><th>Veličina</th><th>Analitički</th><th>Samo GPR</th><th>Hibridni</th><th>Odabran</th><th>Pokrivenost</th></tr>' + S.OUTS.map(o => {
+    $('suCV').innerHTML = '<tr><th>Veličina</th><th>Broj simulacija</th><th>Analitički</th><th>Samo GPR</th><th>Hibridni</th><th>Odabran</th><th>Pokrivenost</th></tr>' + S.OUTS.map(o => {
       const m = M.models[o.id], best = Math.min(m.mae.ana, m.mae.pure, m.mae.hyb);
       const c = v => `<td class="${v === best ? 'good' : ''}">${suFmt(o, v)}</td>`;
-      return `<tr><td>${o.lab}, ${o.unit}</td>${c(m.mae.ana)}${c(m.mae.pure)}${c(m.mae.hyb)}<td>${m.sel === 'hyb' ? 'hibridni' : 'samo GPR'}</td><td>${fmt(100 * m.cover, 0)} %</td></tr>`;
+      return `<tr><td>${o.lab}, ${o.unit}</td><td>${m.n}</td>${c(m.mae.ana)}${c(m.mae.pure)}${c(m.mae.hyb)}<td>${m.sel === 'hyb' ? 'hibridni' : 'samo GPR'}</td><td>${fmt(100 * m.cover, 0)} %</td></tr>`;
     }).join('');
-    $('suCVNote').textContent = `Srednja apsolutna pogreška na ${M.n} simulacija, svaka predviđena bez nje same ("izostavi jedan"). Pokrivenost je udio simulacija unutar 95 % intervala odabranog modela.`;
+    $('suCVNote').textContent = `Srednja apsolutna pogreška na ${M.n} simulacija (za veličinu kojoj neka simulacija nema vrijednost, na manje), svaka predviđena bez nje same ("izostavi jedan"). Pokrivenost je udio simulacija unutar 95 % intervala odabranog modela.`;
     const EX = window.SUROGAT_PODACI.extrap;
     if (EX) {
       const lab = { Q: 'Q ≥ 1,35 kJ/mm', T0: 'T₀ ≥ 100 °C', d: 'd ≥ 16 mm', Re: 'Re ≥ 550 MPa' };
@@ -699,8 +745,10 @@
     }
     renderSuParity();
     const r = M.S.range;
+    const xr = k => { const v = window.SUROGAT_PODACI.rows.map(q => q.x[k]); return [Math.min(...v), Math.max(...v)]; };
     $('suData').innerHTML = '<tr><th>Ulaz</th><th>Najmanje</th><th>Najviše</th><th>Duljina ℓ (najveći σx, odabrani model)</th></tr>' + S.FEATS.map((f, i) =>
-      `<tr><td>${S.FEAT_LAB[f]}</td><td>${fmt(r[f][0], f === 'Q' ? 2 : 0)}</td><td>${fmt(r[f][1], f === 'Q' ? 2 : 0)}</td><td>${M.models.sxMax.ell[i] > 10 ? 'iznad 10 (gotovo bez utjecaja)' : fmt(M.models.sxMax.ell[i], 2)}</td></tr>`).join('');
+      `<tr><td>${S.FEAT_LAB[f]}</td><td>${fmt(r[f][0], f === 'Q' ? 2 : 0)}</td><td>${fmt(r[f][1], f === 'Q' ? 2 : 0)}</td><td>${M.models.sxMax.ell[i] > 10 ? 'iznad 10 (gotovo bez utjecaja)' : fmt(M.models.sxMax.ell[i], 2)}</td></tr>`).join('') +
+      [['I', 'struja I, A (kroz Q)'], ['v', 'brzina v, cm/min (kroz Q)']].map(([k, lab]) => { const [a, b] = xr(k); return `<tr><td>${lab}</td><td>${fmt(a, 0)}</td><td>${fmt(b, 0)}</td><td class="muted">nije zaseban ulaz</td></tr>`; }).join('');
   }
   function renderSuParity() {
     const S = window.SUR, o = S.OUTS.find(q => q.id === SU.out), m = SU.M.models[o.id];
@@ -756,15 +804,19 @@
   }
 
   /* ---------------- generator za CalculiX ---------------- */
-  function ccxOpts() { return { mesh: $('ccxMesh').value, tCool: Math.max(200, parseFloat($('ccxCool').value) || 3000), yProbe: probeY, Weld: W }; }
+  function ccxOpts() { const c = numv($('ccxCool').value); return { mesh: $('ccxMesh').value, tCool: Number.isFinite(c) ? Math.max(200, c) : 3000, yProbe: probeY, Weld: W }; }
   function renderCcx() {
     if (!P || !window.CCX) return;
     const i = window.CCX.build(P, { ...ccxOpts(), infoOnly: true }).info;
     $('ccxInfo').innerHTML = `Mreža ${i.nx} × ${i.ny} × ${i.nz} elemenata (${i.elems.toLocaleString('hr-HR')} elemenata, ${i.nodes.toLocaleString('hr-HR')} čvorova), ` +
       `Goldak b = ${fmt(i.g.b, 1)} mm, c = ${fmt(i.g.c, 1)} mm, Q = ${fmt(i.Qtot, 0)} W${KCAL.on ? ' (kalibrirani k)' : ''}; ` +
-      `${i.nSteps} mehaničkih koraka. Procjena trajanja: oko <b>${i.estMin} min</b>.`;
+      `${i.nSteps} mehaničkih koraka (isti broj za svako trajanje hlađenja). Procjena trajanja: oko <b>${i.estMin} min</b>.`;
     const w = [];
     if (P.joint !== 'butt') w.push('Generator izrađuje model sučeljenog spoja; za kutni spoj geometriju treba prilagoditi.');
+    const cool = numv($('ccxCool').value);
+    if (!Number.isFinite(cool)) w.push('Trajanje hlađenja nije broj, pa se koristi 3000 s.');
+    else if (cool < 200) w.push('Trajanje hlađenja manje od 200 s povećano je na 200 s.');
+    else if (cool < 1000) w.push(`Uz ${fmt(cool, 0)} s hlađenja ploča još nije na sobnoj temperaturi, pa naprezanja nisu konačna; preporuka je barem 1.000 s.`);
     if (i.estMin > 10) w.push(`Procjena je dulja od 10 minuta. Za prvu provjeru ${$('ccxMesh').value !== 'gruba' ? 'odaberi grubu mrežu ili ' : ''}privremeno smanji duljinu zavara L (npr. na 200 mm) i širinu B (npr. na 120 mm): u sredini dovoljno dugog zavara uzdužna naprezanja gotovo se ne mijenjaju, a račun je nekoliko puta brži.`);
     $('ccxWarn').textContent = w.join(' ');
   }
@@ -860,10 +912,10 @@
     }, e => { msg(e && e.code === 'revoked' ? 'Pristup zajedničkom dnevniku više nije dostupan.' : 'Veza sa zajedničkim dnevnikom je prekinuta. Osvježi stranicu.'); });
     if (local.length && !STORE.readOnly) {
       $('lgMigrateRow').hidden = false;
-      $('lgMigrate').textContent = `Prenesi ${local.length} ${local.length === 1 ? 'lokalni zapis' : 'lokalnih zapisa'} u zajednički dnevnik`;
+      $('lgMigrate').textContent = `Prenesi ${local.length} ${plural(local.length, 'lokalni zapis', 'lokalna zapisa', 'lokalnih zapisa')} u zajednički dnevnik`;
       $('lgMigrate').onclick = async () => {
         $('lgMigrate').disabled = true;
-        if (await logAdd(local)) { try { localStorage.removeItem(LKEY); } catch (e) { /* nije važno */ } $('lgMigrateRow').hidden = true; msg(`Preneseno ${local.length} zapisa.`); }
+        if (await logAdd(local)) { try { localStorage.removeItem(LKEY); } catch (e) { /* nije važno */ } $('lgMigrateRow').hidden = true; msg(`Preneseno ${local.length} ${plural(local.length, 'zapis', 'zapisa', 'zapisa')}.`); }
         $('lgMigrate').disabled = false;
       };
     }
@@ -891,9 +943,9 @@
       const rows = LOG.map(r => `<tr data-id="${r.id}" class="${r.demo ? 'demo-row' : ''}">
         <td class="num">${new Date(r.ts).toLocaleDateString('hr-HR')}</td>
         <td>${esc(r.oznaka) || '–'}</td><td>${esc(r.zavarivac) || '–'}</td><td>${esc(r.in.mat)}</td>
-        <td class="num">${fmt(r.in.T0, 0)}</td><td class="num">${fmt(r.pred.Q, 2)}</td>
-        <td class="num">${fmt(r.pred.t85, 1)}</td><td class="num">${Math.round(r.pred.HV)}</td><td class="num">${Math.round(r.pred.risk)}</td>
-        ${MJ.map(([k]) => `<td><input type="number" step="any" data-k="${k}" value="${r.mj[k] === '' || r.mj[k] == null ? '' : r.mj[k]}" aria-label="${k}"></td>`).join('')}
+        <td class="num">${fmt(numv(r.in.T0), 0)}</td><td class="num">${fmt(numv(r.pred.Q), 2)}</td>
+        <td class="num">${fmt(numv(r.pred.t85), 1)}</td><td class="num">${fmt(numv(r.pred.HV), 0)}</td><td class="num">${fmt(numv(r.pred.risk), 0)}</td>
+        ${MJ.map(([k, lab]) => `<td><input type="text" inputmode="decimal" data-k="${k}" value="${r.mj[k] === '' || r.mj[k] == null ? '' : String(r.mj[k]).replace('.', ',')}" aria-label="${esc(lab)}"></td>`).join('')}
         <td><select data-k="greske" aria-label="Greške">${GRESKE.map(g => `<option ${g === r.mj.greske ? 'selected' : ''} value="${g}">${g || '–'}</option>`).join('')}</select></td>
         <td class="num"><button type="button" class="ghost" data-act="load">Učitaj</button> <button type="button" class="ghost" data-act="del" aria-label="Obriši zapis">Obriši</button></td>
         </tr>`).join('');
@@ -908,18 +960,35 @@
     const tr = ev.target.closest('tr'); if (!tr) return;
     const r = LOG.find(x => x.id === tr.dataset.id); if (!r) return;
     const k = ev.target.dataset.k;
-    const val = k === 'greske' ? ev.target.value : (ev.target.value === '' ? '' : parseFloat(ev.target.value));
+    let val = k === 'greske' ? ev.target.value : (ev.target.value.trim() === '' ? '' : numv(ev.target.value));
+    if (k !== 'greske' && val !== '') {
+      // kutna deformacija i naprezanje smiju biti negativni, t8/5 i tvrdoća ne
+      if (!Number.isFinite(val) || ((k === 't85' || k === 'HV') && val <= 0)) {
+        ev.target.classList.add('bad'); msg(`"${ev.target.value}" nije ispravna vrijednost za ${ev.target.getAttribute('aria-label')}; upiši pozitivan broj (decimalni zarez ili točka).`);
+        return;
+      }
+    }
+    ev.target.classList.remove('bad');
     logPatch(r, { ...r.mj, [k]: val }).then(ok => { if (ok && !STORE.shared) { renderML(); renderScatter('scHV', 'HV', 'HV'); renderScatter('scT', 't85', 's'); if (ML.use) render(); } });
   });
   $('lgTable').addEventListener('click', ev => {
     const b = ev.target.closest('button'); if (!b) return;
     const tr = b.closest('tr'); const r = LOG.find(x => x.id === tr.dataset.id); if (!r) return;
     if (b.dataset.act === 'del') { logDelete([r.id]).then(ok => { if (ok) msg('Zapis je obrisan.'); }); }
-    if (b.dataset.act === 'load') { loadEntry(r); msg(`Ulazi zapisa ${r.oznaka || ''} učitani su u obrazac.`); go('ulazi'); }
+    if (b.dataset.act === 'load') {
+      loadEntry(r);
+      msg(LOADMISS.length ? `Zapis ${r.oznaka || ''} nema: ${LOADMISS.join(', ')}. Ta polja zadržala su prethodne vrijednosti, pa ih provjeri.` : `Ulazi zapisa ${r.oznaka || ''} učitani su u obrazac.`);
+      if (P) renderStKey();
+      go('ulazi');
+    }
   });
 
   function loadEntry(r) {
     const i = r.in;
+    const lab = { Re: 'Re', d: 'debljina', B: 'širina B', L: 'duljina L', I: 'struja', U: 'napon', v: 'brzina', TpWPS: 'propisano predgrijavanje', T0: 'temperatura komada', Ta: 'okolna temperatura', RH: 'vlažnost' };
+    const missing = Object.keys(lab).filter(k => i[k] === undefined || i[k] === null || i[k] === '');
+    const miss2 = CHEM.filter(k => i[k] === undefined || i[k] === null || i[k] === '');
+    LOADMISS = missing.map(k => lab[k]).concat(miss2.length ? ['sastav (' + miss2.join(', ') + ')'] : []);
     if (W.MAT[i.mat]) $('mat').value = i.mat;
     const set = (id, v) => { if (v !== undefined && v !== null && v !== '') $(id).value = v; };
     ['Re', 'd', 'B', 'L', 'joint', 'restr', 'proc', 'I', 'U', 'v', 'TpWPS', 'T0', 'Ta', 'RH', 'tmin', 'tmax', 'Tmax'].forEach(k => set(k, i[k]));
@@ -1113,7 +1182,7 @@
           pred: { Q: num(get(r, 'Q_kJ_mm')), t85: num(get(r, 't85_pred_s')), HV: num(get(r, 'HV_pred')), TpCET: num(get(r, 'Tp_CET_C')), risk: num(get(r, 'rizik_pred')) },
           mj: { t85: num(get(r, 't85_mj_s')), HV: num(get(r, 'HV_mj')), def: num(get(r, 'kutna_def_mj_deg')), sig: num(get(r, 'sigma_mj_MPa')), greske: get(r, 'greske') } });
       });
-      if (await logAdd(add)) msg(`Uvezeno ${add.length} zapisa.`);
+      if (await logAdd(add)) msg(`Uvezeno ${add.length} ${plural(add.length, 'zapis', 'zapisa', 'zapisa')}.`);
     } catch (e) { msg('Datoteku nije moguće pročitati kao CSV.'); }
     ev.target.value = '';
   });
@@ -1590,9 +1659,9 @@ Pravila:
     $('certChem').innerHTML = CERT_FIELDS.map(k => {
       const v = r && r.values[k] !== undefined ? r.values[k] : '';
       const fl = r && r.flags[k];
-      return `<label class="${fl || v === '' ? 'flag' : ''}" title="${esc(fl || (v === '' ? 'nije pronađeno' : ''))}">${k}<input type="number" step="0.001" min="0" data-el="${k}" value="${v}"></label>`;
-    }).join('') + `<label>ReH, MPa<input type="number" step="1" data-el="ReH" value="${CERTP.res.ReH ?? ''}"></label>` +
-      `<label>CEV<input type="number" step="0.01" data-el="CEV" value="${(r && r.values.CEV !== undefined ? r.values.CEV : CERTP.res.cev) ?? ''}"></label>`;
+      return `<label class="${fl || v === '' ? 'flag' : ''}" title="${esc(fl || (v === '' ? 'nije pronađeno' : ''))}">${k}<input type="text" inputmode="decimal" data-el="${k}" value="${v}"></label>`;
+    }).join('') + `<label>ReH, MPa<input type="text" inputmode="decimal" data-el="ReH" value="${CERTP.res.ReH ?? ''}"></label>` +
+      `<label>CEV<input type="text" inputmode="decimal" data-el="CEV" value="${(r && r.values.CEV !== undefined ? r.values.CEV : CERTP.res.cev) ?? ''}"></label>`;
     const notes = [];
     if (r) Object.entries(r.flags).filter(([k]) => CERT_FIELDS.includes(k) || k === 'CEV').forEach(([k, f]) => notes.push(`${k}: ${f.replace(/\./g, ',')}`));
     const miss = r ? CERT_FIELDS.filter(k => r.values[k] === undefined) : CERT_FIELDS;
@@ -1725,15 +1794,20 @@ Pravila:
   });
   $('certCancel').addEventListener('click', () => { $('certPanel').hidden = true; cstat('Učitavanje certifikata je otkazano.'); });
   $('certApply').addEventListener('click', () => {
-    const val = k => { const el = $('certChem').querySelector(`[data-el="${k}"]`); const v = el ? parseFloat(el.value) : NaN; return Number.isFinite(v) ? v : null; };
+    const val = k => { const el = $('certChem').querySelector(`[data-el="${k}"]`); const v = el ? numv(el.value) : NaN; return Number.isFinite(v) ? v : null; };
     const preset = window.Cert.presetFor(CERTP.res.grade);
+    const have = CERT_FIELDS.filter(k => val(k) !== null);
+    if (!have.length && val('ReH') === null) { cstat('Na certifikatu nije prepoznata nijedna vrijednost (sastav ni ReH), pa nema što primijeniti. Upiši vrijednosti u tablicu ili označi područje s kemijskim sastavom.'); return; }
     if (preset && $('mat').value !== preset) { $('mat').value = preset; applyMaterial(); }
     CERT_FIELDS.forEach(k => { const v = val(k); if (v !== null) $('c' + k).value = v; });
     const reh = val('ReH'); if (reh !== null) $('Re').value = reh;
     CERT = { cev: val('CEV'), heat: CERTP.res.heat, grade: CERTP.res.grade, file: CERTP.name };
     $('certPanel').hidden = true;
     $('certInfo').innerHTML = `Podaci iz certifikata <b>${esc(CERT.file)}</b>${CERT.grade ? ', ' + esc(CERT.grade) : ''}${CERT.heat ? ', talina ' + esc(CERT.heat) : ''}.`;
-    cstat('Vrijednosti iz certifikata upisane su u obrazac.');
+    const miss = CERT_FIELDS.filter(k => val(k) === null).concat(val('ReH') === null ? ['ReH'] : []);
+    CERT.miss = miss;
+    cstat('Vrijednosti iz certifikata upisane su u obrazac.' + (miss.length ? ' Nisu na certifikatu (ostale su tipične vrijednosti za ' + $('mat').value + '): ' + miss.join(', ') + '.' : ''));
+    if (miss.length) $('certInfo').innerHTML += ` <span class="warnline" style="display:inline">Tipične vrijednosti zadržane za: ${esc(miss.join(', '))}.</span>`;
     probeAuto = true; render();
   });
 
@@ -1761,18 +1835,23 @@ Pravila:
   }
   $('femFile').addEventListener('change', async ev => {
     const files = [...ev.target.files]; ev.target.value = ''; if (!files.length) return;
-    const msgs = [];
+    const ok = [], bad = [];
     for (const f of files) {
-      const text = await f.text(), pts = parseTwoCols(text);
-      if (pts.length < 3) { msgs.push(`U "${f.name}" nisu pronađena barem tri retka s dva broja.`); continue; }
+      const text = await f.text(); let pts = parseTwoCols(text);
+      const head = text.replace(/^\ufeff/, '').split(/\r?\n/)[0].toLowerCase();
+      if (pts.length < 3) { bad.push(`U "${f.name}" nisu pronađena barem tri retka s dva broja.`); continue; }
+      if (/temp|°c|\bt_?c\b|vrijeme|time|\bt_?s\b/.test(head) && !/sigma|σ|\bs[xy]\b|mpa/.test(head)) { bad.push(`"${f.name}" izgleda kao toplinski ciklus (vrijeme i temperatura); učitaj ga na kartici Toplina.`); continue; }
+      let note = '';
+      if (/\bpa\b|\(pa\)|_pa\b/.test(head) && !/mpa/.test(head)) { pts = pts.map(q => [q[0], q[1] / 1e6]); note = ' (pretvoreno iz Pa u MPa)'; }
+      if (pts.some(q => Math.abs(q[1]) > 5000)) { bad.push(`U "${f.name}" ima naprezanja većih od 5.000 MPa. Jesu li vrijednosti u Pa? Zapiši ih u MPa ili u zaglavlje stavi jedinicu Pa.`); continue; }
       const kind = femKindOf(text, pts);
-      FEM[kind] = pts;
-      msgs.push(`"${f.name}": ${pts.length} točaka, ${kind === 'x' ? 'uzdužno naprezanje σx preko zavara' : 'poprečno naprezanje σy duž zavara'}.`);
+      FEM[kind] = pts; FEM.sig = sigFem(P);
+      ok.push(`"${f.name}": ${pts.length} ${plural(pts.length, 'točka', 'točke', 'točaka')}, ${kind === 'x' ? 'uzdužno naprezanje σx preko zavara' : 'poprečno naprezanje σy duž zavara'}${note}.`);
     }
-    $('femStatus').textContent = 'Učitano: ' + msgs.join(' ');
+    $('femStatus').textContent = (ok.length ? 'Učitano: ' + ok.join(' ') : '') + (bad.length ? (ok.length ? ' Nije učitano: ' : 'Nije učitano: ') + bad.join(' ') + ((FEM.x || FEM.y) && !ok.length ? ' Prethodno učitani rezultati ostaju.' : '') : '');
     if (P) renderStress();
   });
-  $('femClear').addEventListener('click', () => { FEM.x = null; FEM.y = null; $('femStatus').textContent = 'Učitani rezultati su uklonjeni.'; if (P) renderStress(); });
+  $('femClear').addEventListener('click', () => { FEM.x = null; FEM.y = null; FEM.sig = ''; $('femStatus').textContent = 'Učitani rezultati su uklonjeni.'; if (P) renderStress(); });
   ['smMM', 'smOK', 'smSU'].forEach(id => $(id).addEventListener('change', () => { if (P) renderStress(); }));
 
   /* ---------------- vođeni primjer ---------------- */
@@ -1790,11 +1869,12 @@ Pravila:
     try {
       FEM.x = parseTwoCols(await get('profil_sx.csv'));
       FEM.y = parseTwoCols(await get('profil_sy.csv'));
+      FEM.sig = sigFem(P);
       $('femStatus').textContent = 'Učitan primjer rezultata iz CalculiX-a za ove ulaze (σx i σy).';
       const pts = parseTwoColsTime(await get('ciklus_T.csv'));
-      Object.assign(MC, { pts, name: 'ciklus_T.csv (primjer iz CalculiX-a)', stats: W.cycleStats(pts) });
-      $('mcY').value = 4; probeY = 4; probeAuto = false;
-      $('mcStatus').textContent = 'Učitan simulirani ciklus iz CalculiX-a, 4 mm od osi zavara.';
+      Object.assign(MC, { pts, name: 'ciklus_T.csv (primjer iz CalculiX-a)', stats: W.cycleStats(pts), sig: sigCyc(P) });
+      $('mcY').value = 6; probeY = 6; probeAuto = false;
+      $('mcStatus').textContent = 'Učitan simulirani ciklus iz CalculiX-a, 6 mm od osi zavara (ZUT).';
       done.push('rezultati CalculiX-a (naprezanja i toplinski ciklus)');
     } catch (e) { st('Rezultati CalculiX-a nisu dostupni na ovoj adresi; ostatak primjera je učitan.'); }
     if (!STORE.shared && !LOG.some(r => r.demo)) { await logAdd(demoEntries()); done.push('6 izmišljenih zapisa u dnevniku'); }
@@ -1809,9 +1889,13 @@ Pravila:
   let pending = false;
   const schedule = () => { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; render(); }); };
 
-  $('mat').addEventListener('change', () => { applyMaterial(); probeAuto = true; schedule(); });
+  $('mat').addEventListener('change', () => {
+    applyMaterial(); probeAuto = true;
+    if (CERT) { CERT = null; $('certInfo').innerHTML = 'Promijenjen je materijal, pa su podaci s certifikata zamijenjeni tipičnim vrijednostima za ' + esc($('mat').value) + '.'; }
+    schedule();
+  });
   $('proc').addEventListener('change', () => { applyProcess(); schedule(); });
-  $('f').addEventListener('input', ev => { if (ev.target.id !== 'mat' && ev.target.id !== 'proc') schedule(); });
+  $('f').addEventListener('input', ev => { LOADMISS = []; if (ev.target.id !== 'mat' && ev.target.id !== 'proc') schedule(); });
   ['TA', 'TB'].forEach(id => $(id).addEventListener('input', () => { if (P) { renderCompare(); if (pwMode !== 'meas') renderPW(); } }));
 
   $('yProbe').addEventListener('input', () => { probeY = parseFloat($('yProbe').value); probeAuto = false; if (P) { renderCycle(); if (!playing) drawField(); } });
@@ -1872,28 +1956,32 @@ Pravila:
     const box = (v, unit, lab, sub) => `<div class="metric"><b>${v}${unit ? ' <small>' + unit + '</small>' : ''}</b><span>${lab}${sub ? '<br>' + sub : ''}</span></div>`;
     const M = W.stressModels(P, P.T0);
     if (SU.pred) {
-      const o = SU.pred.out, iv = (q, d) => `95 % interval ${fmt(q.vlo, d)} do ${fmt(q.vup, d)}`;
+      const o = SU.pred.out, iv = (q, d) => `95 % interval ${fmt(q.vlo, d)} do ${fmt(q.vup, d)}${q.vclip ? '*' : ''}`;
       $('stKey').innerHTML = box(fmt(o.sxMax.val, 0), 'MPa', 'najveće uzdužno naprezanje σx', iv(o.sxMax, 0)) +
         box('±' + fmt(o.b0.val, 1), 'mm', 'širina vlačne zone (od osi zavara)', iv(o.b0, 1)) +
         box(fmt(o.syMid.val, 0), 'MPa', 'poprečno naprezanje σy u sredini zavara', iv(o.syMid, 0));
       const rel = 100 * o.sxMax.val / P.Re;
       let note = `Surogatni model naučen na proračunima u CalculiX-u. Najveće naprezanje iznosi ${fmt(rel, 0)} % granice tečenja i nalazi se u ZUT-u, nekoliko milimetara od osi zavara; u samom zavaru je niže. ` +
         `Analitički model Masubuchija i Martina daje ${fmt(M.MM.peak, 0)} MPa i vlačnu zonu ±${fmt(M.MM.b, 1)} mm.`;
-      if ($('suWarn').textContent) note += ` <span class="warnline" style="display:inline">${esc($('suWarn').textContent)}</span>`;
+      let wt = $('suWarn').textContent;
+      if (!['sxMax', 'b0', 'syMid'].some(k => o[k].vclip)) wt = wt.replace(SU.clipMsg, '').trim();   // zvjezdica se ovdje odnosi samo na prikazane vrijednosti
+      if (wt) note += ` <span class="warnline" style="display:inline">${esc(wt)}</span>`;
       $('stKeyNote').innerHTML = note;
     } else {
       $('stKey').innerHTML = box(fmt(M.MM.peak, 0), 'MPa', 'najveće uzdužno naprezanje σx', 'analitički model') +
         box('±' + fmt(M.MM.b, 1), 'mm', 'širina vlačne zone', 'Masubuchi i Martin') + box(fmt(M.TR.at(P.L / 2), 0), 'MPa', 'σy u sredini zavara', 'analitički model');
       $('stKeyNote').textContent = SU.err || '';
     }
-    $('stSide').innerHTML = box(fmt(E.Q, 2), 'kJ/mm', 'unos topline') + box(fmt(E.t85, 1), 's', 't8/5 (EN 1011-2)') +
+    if (LOADMISS.length) $('stKeyNote').insertAdjacentHTML('afterbegin', `<span class="warnline" style="display:block;margin:0 0 6px">Učitani zapis iz dnevnika nema: ${esc(LOADMISS.join(', '))}; ta polja zadržala su prethodne vrijednosti.</span>`);
+    if (femStale() || mcStale()) $('stKeyNote').insertAdjacentHTML('beforeend', ` <span class="warnline" style="display:block;margin-top:6px">${femStale() ? 'Učitani rezultati iz CalculiX-a' : 'Učitani toplinski ciklus'}${femStale() && mcStale() ? ' i toplinski ciklus' : ''} izračunati su za druge ulaze nego što su sada upisani.</span>`);
+    $('stSide').innerHTML = box(fmt(E.Q, 2), 'kJ/mm', 'unos topline' + (KCAL.on ? `<br>kalibrirani k = ${fmt(KCAL.k, 2)}` : '')) + box(fmt(E.t85, 1), 's', 't8/5 (EN 1011-2)') +
       box(String(Math.round(E.HV)), 'HV', 'najveća tvrdoća ZUT-a') + box(String(Math.round(E.risk)), '', 'indeks rizika od grešaka', verdict(E.risk)[0]);
   }
 
   /* ---------------- stranice (kartice) ---------------- */
   // Svaka kartica je <div class="tab">; adresa (#polje, #dnevnik…) bira karticu, a dublja sidra (#prozor) i mjesto na njoj.
   const TAB_ROOTS = { naprezanja: 't-naprezanja', surogat: 't-surogat', polje: 't-toplina', dnevnik: 't-dnevnik', procjena: 't-rizik', plan: 't-orad' };
-  function route() {
+  function route(ev) {
     const h = decodeURIComponent(location.hash.slice(1)) || 'naprezanja';
     let el = document.getElementById(h);
     let tab = el ? (el.classList.contains('tab') ? el : el.closest('.tab')) : null;
@@ -1902,12 +1990,18 @@ Pravila:
     document.querySelectorAll('nav.tabs a').forEach(a => { if (a.dataset.tab === tab.id) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     $('inSum').hidden = tab.id === 't-naprezanja';
     // preglednik nakon promjene adrese sam skoči na sidro; to se poništava u sljedećem okviru
-    requestAnimationFrame(() => { if (el && !TAB_ROOTS[h]) el.scrollIntoView({ behavior: 'auto', block: 'start' }); else window.scrollTo(0, 0); });
+    requestAnimationFrame(() => {
+      if (el && !TAB_ROOTS[h]) el.scrollIntoView({ behavior: 'auto', block: 'start' }); else window.scrollTo(0, 0);
+      // nakon promjene kartice tipkovnicom ili čitačem zaslona fokus ide na naslov kartice
+      if (ev && TAB_ROOTS[h]) { const h2 = tab.querySelector('h2'); if (h2) { h2.setAttribute('tabindex', '-1'); h2.focus({ preventScroll: true }); } }
+    });
     fieldStateDirty = true; lastT = 0;
     if (P && tab.id === 't-toplina' && !playing) drawField();
   }
   function go(h) { if (location.hash === '#' + h) route(); else location.hash = h; }
   window.addEventListener('hashchange', route);
+  { const nv = document.querySelector('nav.tabs'); const upd = () => nv.classList.toggle('end', nv.scrollLeft + nv.clientWidth >= nv.scrollWidth - 4);
+    nv.addEventListener('scroll', upd, { passive: true }); window.addEventListener('resize', upd); upd(); }
   // sažetak ulaza na ostalim karticama
   function renderInSum() {
     if (!P) { $('inSum').innerHTML = 'Ulazni podaci nisu potpuni. <a href="#ulazi">Ispravi ih na prvoj kartici</a>.'; return; }
@@ -1916,7 +2010,7 @@ Pravila:
   }
 
   /* ---------------- pokretanje ---------------- */
-  applyMaterial(); applyProcess();
+  applyMaterial();
   $('HD').value = '5';
   legend();
   suOptions(); suInit(); renderSuValidation();

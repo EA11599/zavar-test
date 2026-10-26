@@ -433,6 +433,8 @@
     const Q0 = base.Q;
     const temps = [p.T0];
     for (let t = Math.ceil(Math.max(p.T0, 0) / 10) * 10 + 10; t <= p.Tmax; t += 10) temps.push(t);
+    // prevruć komad: dopusti hlađenje na najveću dopuštenu temperaturu (i malo ispod nje)
+    if (p.T0 > p.Tmax) for (let t = Math.floor(p.Tmax / 10) * 10; t >= Math.max(p.Tmax - 60, 0); t -= 10) temps.push(t);
     let best = null;
     for (let fi = 0.8; fi <= 1.2001; fi += 0.05)
       for (let fv = 0.7; fv <= 1.3001; fv += 0.05)
@@ -441,7 +443,7 @@
           const Q = heatInput(q);
           if (Q < 0.75 * Q0 || Q > 1.25 * Q0) continue;       // granica kvalifikacije EN ISO 15614-1
           const e = evaluate(q);
-          const cost = e.risk + 8 * (Math.abs(fi - 1) + Math.abs(fv - 1)) + 0.04 * (T - p.T0);
+          const cost = e.risk + 8 * (Math.abs(fi - 1) + Math.abs(fv - 1)) + 0.04 * Math.abs(T - p.T0);
           if (!best || cost < best.cost) best = { cost, p: q, e };
         }
     if (!best || best.e.risk >= base.risk - 1) return { base, best: null };

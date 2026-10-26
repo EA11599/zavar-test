@@ -235,3 +235,9 @@ details.ccxgen[open]{padding-bottom:14px}
 a.btnlink{font-weight:600;color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:7px 12px;text-decoration:none;font-size:.95rem}
 a.btnlink:hover{border-color:var(--ink)}
 #t-rizik .grid2{align-items:start}
+input.bad{border-color:var(--bad);border-width:2px}
+/* uski zasloni: rezultati prije obrasca, nagovještaj da se kartice mogu pomicati */
+@media (max-width:880px){#ulazi .results{order:-1}}
+@media (max-width:760px){nav.tabs:not(.end){-webkit-mask-image:linear-gradient(90deg,#000 80%,transparent);mask-image:linear-gradient(90deg,#000 80%,transparent)}}
+.tab h2[tabindex="-1"]:focus{outline:none}
+@media print{section.intro{display:none!important}.sheet{break-inside:auto}}

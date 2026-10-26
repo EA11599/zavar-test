@@ -14,7 +14,7 @@
 
 <header class="top">
   <h1>Zaostala naprezanja u zavarenim spojevima</h1>
-  <p>Predviđanje iz parametara zavarivanja i stvarnih uvjeta na radnom mjestu: analitički modeli, proračun u CalculiX-u i model strojnog učenja. <span class="ver">Demo, verzija 7</span></p>
+  <p>Predviđanje iz parametara zavarivanja i stvarnih uvjeta na radnom mjestu: analitički modeli, proračun u CalculiX-u i model strojnog učenja. <span class="ver">Demo, verzija 8</span></p>
 </header>
 
 <nav class="tabs" aria-label="Stranice">
@@ -46,10 +46,10 @@
       <legend>Stanje komada neposredno prije zavarivanja</legend>
       <div class="fields">
         <label class="key">Izmjerena temperatura komada, °C
-          <input type="number" id="T0" value="12" step="1" min="-30" max="400">
+          <input type="text" inputmode="decimal" id="T0" value="12">
         </label>
-        <label>Okolna temperatura, °C<input type="number" id="Ta" value="18" step="1"></label>
-        <label>Relativna vlažnost, %<input type="number" id="RH" value="70" step="1" min="1" max="100"></label>
+        <label>Okolna temperatura, °C<input type="text" inputmode="decimal" id="Ta" value="18"></label>
+        <label>Relativna vlažnost, %<input type="text" inputmode="decimal" id="RH" value="70"></label>
       </div>
       <p class="hint">Mjeri se kontaktnim termometrom ili termokredom uz mjesto zavarivanja, a ne "po osjećaju".</p>
       <details class="how"><summary>Zašto je ovo ključni ulaz</summary>
@@ -96,10 +96,10 @@
             <option value="S690QL">S690QL</option>
           </select>
         </label>
-        <label>Granica tečenja Re, MPa<input type="number" id="Re" value="355" min="100"></label>
-        <label>Debljina lima, mm<input type="number" id="d" value="12" min="2" step="1"></label>
-        <label>Ukupna širina ploča B, mm<input type="number" id="B" value="120" min="20" step="10"></label>
-        <label>Duljina zavara L, mm<input type="number" id="L" value="200" min="20" step="10"></label>
+        <label>Granica tečenja Re, MPa<input type="text" inputmode="decimal" id="Re" value="355"></label>
+        <label>Debljina lima, mm<input type="text" inputmode="decimal" id="d" value="12"></label>
+        <label>Ukupna širina ploča B, mm<input type="text" inputmode="decimal" id="B" value="120"></label>
+        <label>Duljina zavara L, mm<input type="text" inputmode="decimal" id="L" value="200"></label>
         <label>Vrsta spoja
           <select id="joint"><option value="butt">Sučeljeni</option><option value="fillet">Kutni (T-spoj)</option></select>
         </label>
@@ -109,20 +109,20 @@
       </div>
       <p class="hint" style="margin-top:12px">Kemijski sastav, maseni udio u %</p>
       <div class="fields chem" id="chem">
-        <label>C<input type="number" id="cC" step="0.01" min="0"></label>
-        <label>Si<input type="number" id="cSi" step="0.01" min="0"></label>
-        <label>Mn<input type="number" id="cMn" step="0.01" min="0"></label>
-        <label>Cr<input type="number" id="cCr" step="0.01" min="0"></label>
-        <label>Mo<input type="number" id="cMo" step="0.01" min="0"></label>
-        <label>Ni<input type="number" id="cNi" step="0.01" min="0"></label>
-        <label>Cu<input type="number" id="cCu" step="0.01" min="0"></label>
-        <label>V<input type="number" id="cV" step="0.01" min="0"></label>
+        <label>C<input type="text" inputmode="decimal" id="cC"></label>
+        <label>Si<input type="text" inputmode="decimal" id="cSi"></label>
+        <label>Mn<input type="text" inputmode="decimal" id="cMn"></label>
+        <label>Cr<input type="text" inputmode="decimal" id="cCr"></label>
+        <label>Mo<input type="text" inputmode="decimal" id="cMo"></label>
+        <label>Ni<input type="text" inputmode="decimal" id="cNi"></label>
+        <label>Cu<input type="text" inputmode="decimal" id="cCu"></label>
+        <label>V<input type="text" inputmode="decimal" id="cV"></label>
       </div>
       <p class="computed" id="ceOut"></p>
       <div class="fields" style="margin-top:10px">
-        <label>Ciljani t8/5 od, s<input type="number" id="tmin" step="1" min="1"></label>
-        <label>Ciljani t8/5 do, s<input type="number" id="tmax" step="1" min="2"></label>
-        <label>Najveća temperatura komada, °C<input type="number" id="Tmax" step="10" min="50"></label>
+        <label>Ciljani t8/5 od, s<input type="text" inputmode="decimal" id="tmin"></label>
+        <label>Ciljani t8/5 do, s<input type="text" inputmode="decimal" id="tmax"></label>
+        <label>Najveća temperatura komada, °C<input type="text" inputmode="decimal" id="Tmax"></label>
       </div>
       <details class="how"><summary>Odakle su podaci o materijalu</summary>
         <p>Odabirom materijala upisuju se tipične vrijednosti. U stvarnoj primjeni sastav i Re preuzimaju se iz certifikata materijala (EN 10204 3.1). Iz sastava se računaju dva ekvivalenta ugljika:</p>
@@ -147,10 +147,10 @@
             <option value="20">HD &gt; 15 (nesušene elektrode)</option>
           </select>
         </label>
-        <label>Struja I, A<input type="number" id="I" value="260" step="5" min="1"></label>
-        <label>Napon U, V<input type="number" id="U" value="27" step="0.5" min="1"></label>
-        <label>Brzina v, cm/min<input type="number" id="v" value="25" step="1" min="1"></label>
-        <label>Propisano predgrijavanje, °C<input type="number" id="TpWPS" value="50" step="5"></label>
+        <label>Struja I, A<input type="text" inputmode="decimal" id="I" value="260"></label>
+        <label>Napon U, V<input type="text" inputmode="decimal" id="U" value="27"></label>
+        <label>Brzina v, cm/min<input type="text" inputmode="decimal" id="v" value="25"></label>
+        <label>Propisano predgrijavanje, °C<input type="text" inputmode="decimal" id="TpWPS" value="50"></label>
         <label class="check"><input type="checkbox" id="coupleU" checked> Pri preporuci napon prati struju (radna karakteristika EN 60974-1)</label>
       </div>
       <details class="how"><summary>Kako se parametri koriste</summary>
@@ -207,7 +207,7 @@
         <label>Gustoća mreže
           <select id="ccxMesh"><option value="gruba" selected>Gruba (brza provjera)</option><option value="srednja">Srednja</option><option value="fina">Fina</option></select>
         </label>
-        <label>Trajanje hlađenja, s<input type="number" id="ccxCool" value="3000" min="200" step="100"></label>
+        <label>Trajanje hlađenja, s<input type="text" inputmode="decimal" id="ccxCool" value="3000"></label>
       </div>
       <p class="computed" id="ccxInfo"></p>
       <p class="warnline" id="ccxWarn"></p>
@@ -222,7 +222,7 @@
         <div class="f">ccx -i toplina</div>
         <div class="f">ccx -i naprezanja</div>
         <div class="f">python izvuci_rezultate.py</div>
-        <p>Prva analiza računa temperaturno polje dok Goldakov izvor prolazi duž zavara i tijekom hlađenja. Druga je mehanička: u svakom koraku učitava temperature iz <code>toplina.frd</code> i računa elastoplastične deformacije, a na kraju ploču ohladi na temperaturu okoline. Skripta zatim izdvaja tri CSV datoteke: <code>profil_sx.csv</code> i <code>profil_sy.csv</code> učitaju se ovdje ispod, kao rezultati iz CalculiX-a, a <code>ciklus_T.csv</code> u dijelu s toplinskim ciklusom, za usporedbu s Rosenthalovim rješenjem.</p>
+        <p>Prva analiza računa temperaturno polje dok Goldakov izvor prolazi duž zavara i tijekom hlađenja. Druga je mehanička: u svakom koraku učitava temperature iz <code>toplina.frd</code> i računa elastoplastične deformacije, a na kraju ploču ohladi na temperaturu okoline. Skripta zatim izdvaja tri CSV datoteke: <code>profil_sx.csv</code> i <code>profil_sy.csv</code> učitaju se gumbom za rezultate iz CalculiX-a iznad, a <code>ciklus_T.csv</code> u dijelu s toplinskim ciklusom, za usporedbu s Rosenthalovim rješenjem.</p>
         <p>Model je polovica ploče (simetrija u ravnini zavara) s heksaedarskim elementima. Pomični izvor zadan je bez korisničkih potprograma: svaki element u zoni izvora dobiva vlastitu krivulju toplinskog toka u vremenu, uzorkovanu iz Goldakove raspodjele, a ukupna snaga normira se na k·U·I. Generator izrađuje model sučeljenog spoja.</p>
         <p><b>Svojstva materijala</b> ovisna o temperaturi računaju se izrazima iz EN 1993-1-2 [7] za ugljični čelik: toplinska vodljivost, specifični toplinski kapacitet (s vrhom na 735 °C), toplinsko produljenje te faktori smanjenja granice tečenja k<sub>y</sub> i modula elastičnosti k<sub>E</sub>, pomnoženi s upisanim Re. Norma vrijedi do 1200 °C. Iznad toga, kao i najmanja krutost i čvrstoća (5 %) te očvršćenje od 10 %, vrijednosti su numeričke pretpostavke. Faktor k<sub>y</sub> u normi odgovara deformaciji od 2 % (proračun na požar), pa za zavarivanje daje nešto višu granicu tečenja između 200 i 400 °C od vrijednosti za 0,2 %.</p>
         <p>Preporuka za prvi proračun je gruba mreža i kraći zavar (npr. L = 200 mm, B = 120 mm), što na običnom računalu traje nekoliko minuta. Procjena trajanja prilagođena je na 37 proračuna na računalu s dvije jezgre; na bržem računalu proračun je kraći.</p>
@@ -247,7 +247,7 @@
 <!-- ============ SUROGATNI MODEL ============ -->
 <section class="block" id="surogat">
   <h2>Surogatni model naprezanja</h2>
-  <p class="lead">Model naučen na 36 proračuna u CalculiX-u predviđa u djeliću sekunde, uz procjenu vlastite nesigurnosti, ono za što MKE proračun treba nekoliko minuta. Uspoređuju se dva pristupa: hibridni (analitički model + Gaussova procesna regresija koja uči njegovo odstupanje) i čisti GPR bez fizikalnog modela. Za svaku veličinu koristi se onaj koji se na provjeri pokazao boljim.</p>
+  <p class="lead">Model naučen na 40 proračuna u CalculiX-u predviđa u djeliću sekunde, uz procjenu vlastite nesigurnosti, ono za što MKE proračun treba nekoliko minuta. Uspoređuju se dva pristupa: hibridni (analitički model + Gaussova procesna regresija koja uči njegovo odstupanje) i čisti GPR bez fizikalnog modela. Za svaku veličinu koristi se onaj koji se na provjeri pokazao boljim.</p>
   <div class="sheet">
     <h3 class="sh">Predviđanje za trenutne ulaze</h3>
     <div class="tablewrap" style="padding:0 18px"><table class="t" id="suTable"></table></div>
@@ -286,12 +286,12 @@
     </div>
   </div>
   <details class="how"><summary>Kako je model izgrađen</summary>
-    <p><b>Podaci.</b> Generatorom s ove stranice izrađeno je 36 proračuna u CalculiX-u (gruba mreža, sučeljeni spoj, B = 120 mm, L = 200 mm, srednja ukliještenost). Ulazi su raspoređeni Latinskom hiperkockom, tako da je svaki ulaz jednoliko pokriven: unos topline Q, temperatura komada T₀, debljina d i granica tečenja Re. Iz svakog proračuna izdvojeni su najveće uzdužno naprezanje σx, poluširina vlačne zone b (udaljenost na kojoj σx prvi put padne na nulu), t8/5 uz rub taline i poprečno naprezanje σy u sredini zavara. Gruba mreža provjerena je na srednjoj: najveći σx razlikuje se 8 %, a b, t8/5 i σy do 2 %. Vrijednost σx u samoj osi zavara nije izlaz modela jer se između te dvije mreže razlikuje 36 %.</p>
+    <p><b>Podaci.</b> Generatorom s ove stranice izrađeno je 40 proračuna u CalculiX-u (gruba mreža, sučeljeni spoj, B = 120 mm, L = 200 mm, srednja ukliještenost). Ulazi su raspoređeni Latinskom hiperkockom, tako da je svaki ulaz jednoliko pokriven: unos topline Q, temperatura komada T₀, debljina d i granica tečenja Re. Iz svakog proračuna izdvojeni su najveće uzdužno naprezanje σx, poluširina vlačne zone b (udaljenost na kojoj σx prvi put padne na nulu), t8/5 uz rub taline i poprečno naprezanje σy u sredini zavara. Gruba mreža provjerena je na srednjoj: najveći σx razlikuje se 8 %, a b, t8/5 i σy do 2 %. Vrijednost σx u samoj osi zavara nije izlaz modela jer se između te dvije mreže razlikuje 36 %.</p>
     <p><b>Hibridni model.</b> GPR ne uči samu vrijednost, nego odstupanje proračuna od analitičkog modela (Masubuchi i Martin za σx i b, EN 1011-2 za t8/5, model poprečnih naprezanja za σy). Omjeri se uče u logaritmu, pa predviđanje ostaje pozitivno, a naprezanja u jedinicama Re. Izvan raspona podataka predviđanje se vraća prema analitičkom modelu. <b>Čisti GPR</b> uči izravno vrijednost iz CalculiX-a, bez fizikalnog modela.</p>
-    <p><b>Odabir.</b> Koristi se hibridni model, osim ako je čisti GPR bolji i unutar raspona ("izostavi jedan") i izvan njega. Rezultat: za t8/5 i σy bolji je hibridni model, jer EN 1011-2 dobro opisuje trend t8/5, a analitički model σy daje barem ispravnu ovisnost o Re. Za najveći σx i širinu vlačne zone bolji je čisti GPR, jer analitički modeli tu imaju krivi trend: Masubuchi i Martin pretpostavljaju vrh jednak Re, a proračuni daju 1,0–1,2·Re u ZUT-u. Fizikalni model pomaže samo onoliko koliko je dobar.</p>
+    <p><b>Odabir.</b> Koristi se hibridni model, osim ako je čisti GPR bolji i unutar raspona ("izostavi jedan") i izvan njega. Rezultat: za t8/5 i σy bolji je hibridni model, jer EN 1011-2 dobro opisuje trend t8/5, a analitički model σy daje barem ispravnu ovisnost o Re. Za najveći σx i širinu vlačne zone bolji je čisti GPR, jer analitički modeli tu imaju krivi trend: Masubuchi i Martin pretpostavljaju vrh jednak Re, a proračuni daju od 0,2 do 1,3·Re u ZUT-u: uz visoku granicu tečenja i mali unos topline naprezanje prelazi Re, a uz predgrijavanje i velik unos topline mala ploča (120 × 200 mm) zagrije se gotovo jednoliko, pa je naprezanje znatno niže od Re. Fizikalni model pomaže samo onoliko koliko je dobar.</p>
     <div class="f">ŷ(x) = f<sub>analitički</sub>(x) ⊕ GPR(x), &nbsp; GPR: k(x, x′) = σ<sub>f</sub>² · exp[−½ Σ (x<sub>i</sub> − x′<sub>i</sub>)² / ℓ<sub>i</sub>²] + σ<sub>n</sub>² δ</div>
     <p>Duljine ℓ<sub>i</sub> uče se za svaki ulaz posebno, maksimizacijom marginalne vjerodostojnosti. Kratka duljina znači da ulaz jako utječe na odstupanje, a duga da ga model gotovo zanemaruje.</p>
-    <p><b>Fizikalni uvjeti.</b> Najveći σx ograničen je na 1,3·Re (u proračunima zbog očvršćenja i višeosnog stanja naprezanja doseže do oko 1,17·Re), a b i t8/5 ne mogu biti negativni. Raspodjela σx na dijagramu iznad ima oblik Masubuchija i Martina s hibridnim najvećim naprezanjem i poluširinom b, pa je samouravnotežena: uzdužna sila preko presjeka jednaka je nuli. To je omotnica raspodjele: proračuni u samom zavaru pokazuju niže naprezanje nego u ZUT-u (M-oblik), što taj oblik ne prikazuje.</p>
+    <p><b>Fizikalni uvjeti.</b> Najveći σx ograničen je na 1,4·Re (u proračunima zbog očvršćenja i višeosnog stanja naprezanja doseže do 1,32·Re), a b i t8/5 ne mogu biti negativni. Raspodjela σx na dijagramu iznad ima oblik Masubuchija i Martina s najvećim naprezanjem i poluširinom b iz odabranog modela, pa je samouravnotežena: uzdužna sila preko presjeka jednaka je nuli. To je omotnica raspodjele: proračuni u samom zavaru pokazuju niže naprezanje nego u ZUT-u (M-oblik), što taj oblik ne prikazuje.</p>
     <p><b>Provjera.</b> Pogreška se računa unakrsnom validacijom "izostavi jedan" u zatvorenom obliku (Rasmussen i Williams, 2006.), uz hiperparametre naučene na svim podacima. Usporedbe radi prikazuje se i "čisti" GPR, koji analitički model ne koristi. Pokrivenost je udio simulacija koje leže unutar 95 % intervala; dobro kalibriran model ima oko 95 %.</p>
     <p><b>Ograničenja.</b> Model vrijedi za raspon ulaza iz tablice "Skup simulacija" i za geometriju iz proračuna (B = 120 mm, L = 200 mm). Za drugačije ulaze stranica to javlja, a nesigurnost raste. Uči odstupanje od MKE proračuna, ne od mjerenja, pa ne može biti točniji od samog proračuna.</p>
   </details>
@@ -325,7 +325,7 @@
         <b>Izmjereni ili simulirani ciklus</b>
         <div class="row" style="margin-top:8px">
           <label class="filebtn">Učitaj ciklus (CSV)<input type="file" id="mcFile" accept=".csv,.txt,text/csv,text/plain" class="sr"></label>
-          <label class="inl">Udaljenost od osi zavara, mm<input type="number" id="mcY" step="0.1" min="0.3" value="3"></label>
+          <label class="inl">Udaljenost od osi zavara, mm<input type="text" inputmode="decimal" id="mcY" value="3"></label>
           <button type="button" class="ghost" id="mcClear">Ukloni ciklus</button>
         </div>
         <p class="hint" id="mcStatus" role="status">Dva stupca: vrijeme u s i temperatura u °C, npr. zapis termopara ili ciklus_T.csv iz CalculiX-a.</p>
@@ -349,12 +349,12 @@
   <div class="cmp">
     <div>
       <h3>Komad A, na suncu</h3>
-      <label>Temperatura komada, °C<input type="number" id="TA" value="38"></label>
+      <label>Temperatura komada, °C<input type="text" inputmode="decimal" id="TA" value="38"></label>
       <dl id="dA"></dl>
     </div>
     <div>
       <h3>Komad B, u sjeni</h3>
-      <label>Temperatura komada, °C<input type="number" id="TB" value="6"></label>
+      <label>Temperatura komada, °C<input type="text" inputmode="decimal" id="TB" value="6"></label>
       <dl id="dB"></dl>
     </div>
   </div>
@@ -408,7 +408,7 @@
     <p class="readout" id="mlOut" style="padding-top:10px"></p>
     <h3 class="sh" style="border-top:1px solid var(--line)">Težine uzroka u indeksu rizika</h3>
     <div class="tablewrap" style="padding:0 18px"><table class="t" id="wTable2"></table></div>
-    <p class="hint" style="padding:0 18px 12px">Ista tablica nalazi se na kartici Procjena, u napomeni "Kako nastaje indeks rizika".</p>
+    <p class="hint" style="padding:0 18px 12px">Ista tablica nalazi se na kartici Rizik od grešaka, u napomeni "Kako nastaje indeks rizika".</p>
     <details class="how"><summary>Kako program uči</summary>
       <p>Iz zapisa u dnevniku s izmjerenim vrijednostima program uči dvije korekcije modela:</p>
       <ul>
@@ -447,7 +447,7 @@
         <div class="metric" id="mHVbox"><b id="mHV">–</b><span id="mHVl">najveća tvrdoća ZUT-a, HV</span></div>
         <div class="metric"><b id="mTp">–</b><span id="mTpl">potrebno predgrijavanje (CET), °C</span></div>
         <div class="metric"><b id="mDew">–</b><span>rosište zraka, °C</span></div>
-        <div class="metric"><b id="mB">–</b><span>širina vlačne zone 2b, mm</span></div>
+        <div class="metric"><b id="mB">–</b><span id="mBl">širina vlačne zone od osi zavara, mm</span></div>
       </div>
       <p class="warnline" id="cetWarn" style="padding:0 18px"></p>
       <details class="how"><summary>Kako se računaju ove vrijednosti</summary>
@@ -485,8 +485,8 @@
       <h2>Preporuka za zavarivača</h2>
       <div class="reco" id="reco"></div>
       <details class="how"><summary>Kako program traži preporuku</summary>
-        <p>Uvjeti koje zavarivač ne može mijenjati ostaju fiksni. Program isprobava kombinacije struje (±20 %), brzine (±30 %) i temperature predgrijavanja do najveće dopuštene temperature materijala, a napon prati struju ako je to uključeno. Bira kombinaciju s najmanjim rizikom uz što manje odstupanje od WPS-a.</p>
-        <p>Odbacuju se kombinacije kod kojih se unos topline mijenja više od ±25 %, što odgovara granici kvalifikacije unosa topline iz EN ISO 15614-1. U konačnoj verziji pretraga se radi nad naučenim modelom.</p>
+        <p>Uvjeti koje zavarivač ne može mijenjati ostaju fiksni. Program isprobava kombinacije struje (±20 %), brzine (±30 %) i temperature komada do najveće dopuštene temperature materijala (ako je komad topliji od nje, preporuka ga hladi na tu temperaturu), a napon prati struju ako je to uključeno. Bira kombinaciju s najmanjim rizikom uz što manje odstupanje od WPS-a.</p>
+        <p>Odbacuju se kombinacije kod kojih se unos topline mijenja više od ±25 %, što odgovara granici kvalifikacije unosa topline iz EN ISO 15614-1.</p>
       </details>
     </div>
   </div>
@@ -521,11 +521,11 @@
 <!-- ============ PLAN ============ -->
 <section class="block" id="plan">
   <h2>Plan razvoja</h2>
-  <p class="lead">Ova stranica je prva faza. Pojednostavljena pravila procjene u kasnijim fazama zamjenjuju rezultati MKE simulacija i model treniran na eksperimentalnim podacima.</p>
+  <p class="lead">Što je gotovo i što slijedi. Analitički modeli već su dopunjeni proračunima u CalculiX-u i surogatnim modelom; sljedeći korak je usporedba s mjerenjima na stvarnim zavarima.</p>
   <ol class="steps">
     <li class="now"><b>Kalkulator i sučelje</b><span>EN 1011-2 (t8/5, predgrijavanje CET), tvrdoća ZUT-a, Rosenthalovo polje, modeli zaostalih naprezanja, učitavanje certifikata, procesni prozor, zajednički dnevnik zavara.</span>
       <details class="how"><summary>Kako se radi</summary><p>Web-aplikacija u HTML-u i JavaScriptu, bez instalacije, objavljena preko GitHub Pages. Izračuni su u zasebnom modulu pokrivenom automatskim testovima, pa sučelje ostaje isto dok se "mozak" u pozadini mijenja.</p></details></li>
-    <li class="now"><b>MKE simulacija u CalculiX-u</b><span>Generator ulaznih datoteka i skripta za rezultate su gotovi (dio "Modeli naprezanja"); slijedi usporedba s mjerenjima i svojstva stvarnog materijala.</span>
+    <li class="now"><b>MKE simulacija u CalculiX-u</b><span>Generator ulaznih datoteka i skripta za rezultate su gotovi (kartica "Zaostala naprezanja"); slijedi usporedba s mjerenjima i svojstva stvarnog materijala.</span>
       <details class="how"><summary>Kako se radi</summary>
         <p>CalculiX je besplatan program za metodu konačnih elemenata, sa sintaksom ulaznih datoteka bliskom Abaqusu. Simulacija se provodi u dva koraka:</p>
         <ul>
@@ -534,12 +534,10 @@
         </ul>
         <p>Pripremu ulaznih datoteka i čitanje rezultata (.frd) automatiziraju Python skripte. Rezultati služe za provjeru Rosenthalovog polja i t8/5, zamjenu pojednostavljene raspodjele naprezanja i dodatne podatke za model.</p>
       </details></li>
-    <li><b>Planirani pokusi</b><span>Namjerno izazivanje nepovoljnih uvjeta (hladan ili vlažan komad, prevelik ili premalen unos topline) i mjerenje rezultata.</span>
-      <details class="how"><summary>Kako se radi</summary><p>Plan pokusa (faktorski ili Taguchijev) da se s najmanje uzoraka obuhvati utjecaj temperature komada, unosa topline, vlažnosti i predgrijavanja. Svaki uzorak upisuje se u dnevnik zavara.</p></details></li>
-    <li class="now"><b>Model strojnog učenja</b><span>Radi: hibridni surogatni model naprezanja (analitički model + Gaussova procesna regresija) naučen na 36 proračuna u CalculiX-u, korekcije t8/5 i tvrdoće iz dnevnika, učenje težina rizika i kalibracija k. Slijedi proširenje skupa simulacija i provjera na mjerenjima.</span>
+    <li><b>Pokusi i mjerenje</b><span>Nekoliko stvarnih zavara (5 do 10) s izmjerenim zaostalim naprezanjima i toplinskim ciklusom, za usporedbu s proračunom u CalculiX-u i surogatnim modelom.</span>
+      <details class="how"><summary>Kako se radi</summary><p>Mali plan pokusa u kojem se mijenja jedan ili dva parametra (npr. temperatura komada i unos topline). Svaki zavar upisuje se u dnevnik zavara, a za iste ulaze radi se proračun u CalculiX-u.</p></details></li>
+    <li class="now"><b>Model strojnog učenja</b><span>Radi: hibridni surogatni model naprezanja (analitički model + Gaussova procesna regresija) naučen na 40 proračuna u CalculiX-u, korekcije t8/5 i tvrdoće iz dnevnika, učenje težina rizika i kalibracija k. Slijedi proširenje skupa simulacija i provjera na mjerenjima.</span>
       <details class="how"><summary>Kako se radi</summary><p>Kao ulazi koriste se i fizikalne veličine (Q, t8/5, CE, CET), a ne samo sirovi parametri. Usporedit će se jednostavniji modeli (regresija, random forest) s neuronskom mrežom, uz unakrsnu validaciju. Simulacije iz CalculiX-a proširuju mali eksperimentalni skup.</p></details></li>
-    <li><b>Prilagodba zavarivaču</b><span>Uključivanje stvarno postignutih parametara pojedinog zavarivača u preporuku.</span>
-      <details class="how"><summary>Kako se radi</summary><p>Iz dnevnika se za svakog zavarivača računa razlika između zadanih i postignutih parametara (npr. sustavno brže vođenje). Program je uzima u obzir, pa preporuka postaje prilagođena osobi, a ne samo WPS-u.</p></details></li>
   </ol>
 </section>
 

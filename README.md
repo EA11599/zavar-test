@@ -1,8 +1,8 @@
 # Zaostala naprezanja u zavarenim spojevima – demo
 
-Prototip web-aplikacije za diplomski rad: procjena rizika od grešaka i zaostalih naprezanja u zavarenom spoju na temelju stvarnih uvjeta na radnom mjestu i parametara zavarivanja, uz prijedlog korekcije parametara.
+Prototip web-aplikacije za diplomski rad "Primjena umjetne inteligencije za predviđanje zaostalih naprezanja u zavarenim spojevima": predviđanje zaostalih naprezanja analitičkim modelima, proračunom u CalculiX-u i surogatnim modelom (Gaussova procesna regresija) naučenim na tim proračunima. Dodatno procjenjuje rizik od grešaka na temelju uvjeta na radnom mjestu i predlaže korekciju parametara.
 
-Stranica: https://ea11599.github.io/zavar-demo/
+Stranica: https://ea11599.github.io/zavar-test/
 
 ## Što računa
 
@@ -19,7 +19,7 @@ Stranica: https://ea11599.github.io/zavar-demo/
 - učitavanje izmjerenog (termopar) ili simuliranog toplinskog ciklusa i kalibraciju toplinske iskoristivosti k
 - učenje korekcija t8/5 i tvrdoće ZUT-a iz dnevnika, s unakrsnom validacijom "izostavi jedan"
 - učenje težina indeksa rizika iz nalaza ispitivanja upisanih u dnevnik (najveća vjerodostojnost uz sidro na stručnoj procjeni, provjera Brierovom ocjenom)
-- hibridni surogatni model zaostalih naprezanja: analitički model + Gaussova procesna regresija naučena na 36 proračuna u CalculiX-u, s 95 % intervalom i upozorenjem izvan raspona
+- hibridni surogatni model zaostalih naprezanja: analitički model + Gaussova procesna regresija naučena na 40 proračuna u CalculiX-u, s 95 % intervalom i upozorenjem izvan raspona
 - vođeni primjer ("Prikaži primjer") koji učitava stvarni proračun iz CalculiX-a i primjere u dnevniku
 - popis izvora za sve izraze i tablicu pretpostavki koje tek treba potvrditi
 - generator ulaznih datoteka za CalculiX (toplinska i mehanička analiza sučeljenog spoja, Goldakov izvor, svojstva čelika prema EN 1993-1-2) i Python skriptu koja rezultate izdvaja u CSV za uvoz u aplikaciju
@@ -36,7 +36,7 @@ Početne težine indeksa rizika i amplitude poprečnih naprezanja su pretpostavk
 | `app.js` | sučelje, grafikoni, animacija, dnevnik, certifikat |
 | `cert.js` | prepoznavanje sastava i CEV-a u certifikatu |
 | `surrogate.js` | Gaussova procesna regresija i hibridni surogatni model |
-| `surogat-podaci.js` | rezultati 36 proračuna u CalculiX-u i naučeni hiperparametri |
+| `surogat-podaci.js` | rezultati 40 proračuna u CalculiX-u i naučeni hiperparametri |
 | `calculix.js` | generator ulaznih datoteka za CalculiX i skripta za rezultate |
 | `primjer-certifikata.pdf` | izmišljeni certifikat za isprobavanje |
 | `primjer-calculix/` | rezultati stvarnog proračuna u CalculiX-u za vođeni primjer (S355J2, 12 mm, B = 120 mm, L = 200 mm, srednja mreža) |

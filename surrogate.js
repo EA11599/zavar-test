@@ -115,7 +115,7 @@
     { id: 'sxMax', lab: 'Najveći σx', unit: 'MPa', dec: 0,
       fwd: (c, a) => c / a.Re, inv: (z, a) => z * a.Re,
       raw: c => c, rawInv: z => z,
-      lim: (v, a) => Math.min(Math.max(v, 0), 1.3 * a.Re) },             // očvršćenje (10 %) i višeosno stanje; u proračunima do 1,17·Re
+      lim: (v, a) => Math.min(Math.max(v, 0), 1.4 * a.Re) },             // očvršćenje i višeosno stanje; u proračunima do 1,32·Re
     { id: 'b0', lab: 'Poluširina vlačne zone b', unit: 'mm', dec: 1,
       fwd: (c, a) => Math.log(c / a.b0), inv: (z, a) => a.b0 * Math.exp(z),
       raw: c => Math.log(c), rawInv: z => Math.exp(z), lim: v => v },
@@ -179,14 +179,18 @@
     OUTS.forEach(o => {
       const m = M.models[o.id];
       const ph = m.hy.predict(z), pp = m.pu.predict(z);
-      const v1 = o.lim(o.inv(ph.mean - 1.96 * ph.sd, a), a), v2 = o.lim(o.inv(ph.mean + 1.96 * ph.sd, a), a);
+      // fizička granica (npr. σx ≤ 1,4·Re): bilježi se je li vrijednost ili interval njome odrezan
+      const clip = { hyb: false, pure: false };
+      const L = (v, k) => { const w = o.lim(v, a); if (Math.abs(w - v) > 1e-6 * (1 + Math.abs(v))) clip[k] = true; return w; };
+      const v1 = L(o.inv(ph.mean - 1.96 * ph.sd, a), 'hyb'), v2 = L(o.inv(ph.mean + 1.96 * ph.sd, a), 'hyb');
       // relativna nesigurnost u odnosu na tipičnu nesigurnost na točkama za učenje
       const typ = m.hy.loo.reduce((s, q) => s + q.sd, 0) / m.hy.loo.length;
       maxRel = Math.max(maxRel, ph.sd / typ);
-      const w1 = o.lim(o.rawInv(pp.mean - 1.96 * pp.sd, a), a), w2 = o.lim(o.rawInv(pp.mean + 1.96 * pp.sd, a), a);
-      const q = { ana: a[o.id], hyb: o.lim(o.inv(ph.mean, a), a), lo: Math.min(v1, v2), up: Math.max(v1, v2),
-        pure: o.lim(o.rawInv(pp.mean, a), a), plo: Math.min(w1, w2), pup: Math.max(w1, w2), sdRel: ph.sd / typ, sel: m.sel };
+      const w1 = L(o.rawInv(pp.mean - 1.96 * pp.sd, a), 'pure'), w2 = L(o.rawInv(pp.mean + 1.96 * pp.sd, a), 'pure');
+      const q = { ana: a[o.id], hyb: L(o.inv(ph.mean, a), 'hyb'), lo: Math.min(v1, v2), up: Math.max(v1, v2),
+        pure: L(o.rawInv(pp.mean, a), 'pure'), plo: Math.min(w1, w2), pup: Math.max(w1, w2), sdRel: ph.sd / typ, sel: m.sel, clip };
       q.val = m.sel === 'hyb' ? q.hyb : q.pure; q.vlo = m.sel === 'hyb' ? q.lo : q.plo; q.vup = m.sel === 'hyb' ? q.up : q.pup;
+      q.vclip = clip[m.sel];
       out[o.id] = q;
     });
     const outside = FEATS.filter(f => x[f] < M.S.range[f][0] - 1e-9 || x[f] > M.S.range[f][1] + 1e-9);
