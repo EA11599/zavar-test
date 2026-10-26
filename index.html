@@ -286,7 +286,7 @@
     </div>
   </div>
   <details class="how"><summary>Kako je model izgrađen</summary>
-    <p><b>Podaci.</b> Generatorom s ove stranice izrađeno je 40 proračuna u CalculiX-u (gruba mreža, sučeljeni spoj, B = 120 mm, L = 200 mm, srednja ukliještenost). Ulazi su raspoređeni Latinskom hiperkockom, tako da je svaki ulaz jednoliko pokriven: unos topline Q, temperatura komada T₀, debljina d i granica tečenja Re. Iz svakog proračuna izdvojeni su najveće uzdužno naprezanje σx, poluširina vlačne zone b (udaljenost na kojoj σx prvi put padne na nulu), t8/5 uz rub taline i poprečno naprezanje σy u sredini zavara. Gruba mreža provjerena je na srednjoj: najveći σx razlikuje se 8 %, a b, t8/5 i σy do 2 %. Vrijednost σx u samoj osi zavara nije izlaz modela jer se između te dvije mreže razlikuje 36 %.</p>
+    <p><b>Podaci.</b> Generatorom s ove stranice izrađeno je 40 proračuna u CalculiX-u (gruba mreža, sučeljeni spoj, B = 120 mm, L = 200 mm, srednja ukliještenost). Ulazi su raspoređeni Latinskom hiperkockom, tako da je svaki ulaz jednoliko pokriven: unos topline Q, temperatura komada T₀, debljina d i granica tečenja Re. Iz svakog proračuna izdvojeni su najveće uzdužno naprezanje σx, poluširina vlačne zone b (udaljenost na kojoj σx prvi put padne na nulu), t8/5 u ZUT-u (u čvoru uz površinu s najvišim vrhom temperature ispod solidusa, 1450 °C) i poprečno naprezanje σy u sredini zavara. Gruba mreža provjerena je na srednjoj: najveći σx razlikuje se 8 %, a b, t8/5 i σy do 2 %. Vrijednost σx u samoj osi zavara nije izlaz modela jer se između te dvije mreže razlikuje 36 %.</p>
     <p><b>Hibridni model.</b> GPR ne uči samu vrijednost, nego odstupanje proračuna od analitičkog modela (Masubuchi i Martin za σx i b, EN 1011-2 za t8/5, model poprečnih naprezanja za σy). Omjeri se uče u logaritmu, pa predviđanje ostaje pozitivno, a naprezanja u jedinicama Re. Izvan raspona podataka predviđanje se vraća prema analitičkom modelu. <b>Čisti GPR</b> uči izravno vrijednost iz CalculiX-a, bez fizikalnog modela.</p>
     <p><b>Odabir.</b> Koristi se hibridni model, osim ako je čisti GPR bolji i unutar raspona ("izostavi jedan") i izvan njega. Rezultat: za t8/5 i σy bolji je hibridni model, jer EN 1011-2 dobro opisuje trend t8/5, a analitički model σy daje barem ispravnu ovisnost o Re. Za najveći σx i širinu vlačne zone bolji je čisti GPR, jer analitički modeli tu imaju krivi trend: Masubuchi i Martin pretpostavljaju vrh jednak Re, a proračuni daju od 0,2 do 1,3·Re u ZUT-u: uz visoku granicu tečenja i mali unos topline naprezanje prelazi Re, a uz predgrijavanje i velik unos topline mala ploča (120 × 200 mm) zagrije se gotovo jednoliko, pa je naprezanje znatno niže od Re. Fizikalni model pomaže samo onoliko koliko je dobar.</p>
     <div class="f">ŷ(x) = f<sub>analitički</sub>(x) ⊕ GPR(x), &nbsp; GPR: k(x, x′) = σ<sub>f</sub>² · exp[−½ Σ (x<sub>i</sub> − x′<sub>i</sub>)² / ℓ<sub>i</sub>²] + σ<sub>n</sub>² δ</div>
@@ -328,7 +328,7 @@
           <label class="inl">Udaljenost od osi zavara, mm<input type="text" inputmode="decimal" id="mcY" value="3"></label>
           <button type="button" class="ghost" id="mcClear">Ukloni ciklus</button>
         </div>
-        <p class="hint" id="mcStatus" role="status">Dva stupca: vrijeme u s i temperatura u °C, npr. zapis termopara ili ciklus_T.csv iz CalculiX-a.</p>
+        <p class="hint" id="mcStatus" role="status">Dva stupca: vrijeme u s i temperatura u °C, npr. zapis termopara ili ciklus_T.csv iz CalculiX-a (skripta sama bira točku u ZUT-u i upisuje njezinu udaljenost u prvi redak, pa se ona ovdje popuni sama).</p>
         <div id="mcOut"></div>
       </div>
     </div>
@@ -338,7 +338,7 @@
     <div class="f">debela ploča (3D): T = T₀ + q / (2πλR) · exp[−v(ξ + R) / 2a], &nbsp; R = √(ξ² + y² + z²)</div>
     <div class="f">tanka ploča (2D): T = T₀ + q / (2πλd) · exp(−vξ / 2a) · K₀(v r / 2a), &nbsp; r = √(ξ² + y²)</div>
     <p>Rosenthalovo rješenje [8]; K₀ je modificirana Besselova funkcija, računa se polinomnim aproksimacijama [14]. Svojstva čelika odabrana su tako da se Rosenthalovo rješenje pri T₀ = 0 °C točno poklapa s koeficijentima izraza iz EN 1011-2, što provjeravaju testovi programa. Zato se t8/5 očitan s krivulje i onaj iz norme razlikuju samo zbog faktora oblika spoja i empirijske ovisnosti o T₀ u normi.</p>
-    <p>Ograničenja: točkasti ili linijski izvor bez raspodjele, svojstva neovisna o temperaturi, bez latentne topline taljenja. Zbog toga je talina u modelu uža, a temperature uz sam izvor nerealno visoke. Upravo ta ograničenja uklanja MKE simulacija u CalculiX-u s Goldakovim izvorom.</p>
+    <p>Ograničenja: točkasti ili linijski izvor bez raspodjele, svojstva neovisna o temperaturi, bez latentne topline taljenja. Zbog toga je talina u modelu uža, a temperature uz sam izvor nerealno visoke. MKE simulacija u CalculiX-u s Goldakovim izvorom uklanja prva dva ograničenja (raspodjela izvora, svojstva ovisna o temperaturi), ali ni ona nema latentnu toplinu taljenja ni strujanje taline, pa i u njoj talina doseže nerealnih 2.500 do 3.000 °C. Na ciklus u ZUT-u i na naprezanja to malo utječe.</p>
   </details>
 </section>
 

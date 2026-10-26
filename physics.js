@@ -384,26 +384,20 @@
   }
 
   /* ---------- kalibracija toplinske iskoristivosti iz izmjerenog ciklusa ---------- */
-  // Traži k za koji Rosenthalov ciklus na udaljenosti y ima izmjereni t8/5 (t8/5 raste s k).
+  // Traži k za koji t8/5 prema EN 1011-2 (ista vrijednost koju stranica prikazuje i koristi za tvrdoću i rizik)
+  // jednak izmjerenom. t8/5 u ZUT-u malo ovisi o udaljenosti od osi, pa položaj točke (y) ne ulazi u izraz;
+  // izmjereni ciklus mora doseći 800 °C. Naučena korekcija iz dnevnika (p.corr) ovdje se ne primjenjuje.
+  // Toplinska iskoristivost fizikalno je najviše 1,0 (sva toplina luka ostaje u komadu).
+  const K_MIN = 0.2, K_MAX = 1.0;
   function calibrateK(p, y, t85meas, T0) {
-    // t8/5 se u ZUT-u malo mijenja s udaljenošću; ako modelna točka ne doseže 800 °C (Rosenthal raspoređuje toplinu
-    // po debljini, pa podcjenjuje vršne temperature uz površinu), koristi se točka uz rub taline
-    // Točka se pomiče prema osi samo koliko treba da njezin vrh dosegne 1000 °C, kontinuirano s k:
-    // inače bi t8/5 skočio pri k za koji modelna točka upravo prijeđe 800 °C.
-    const yAt = pk => Math.min(y, Math.max(0.3, distanceForPeak(pk, 1000, T0)));
-    const tEnd = Math.max(60, 4 * t85meas + 30);
-    const t85At = k => { const pk = { ...p, kEff: k }; return thermalCycle(pk, yAt(pk), T0, tEnd).t85; };
-    let lo = 0.2, hi = 1.3;
-    const fLo = t85At(lo), fHi = t85At(hi);
-    if (!Number.isFinite(fLo) || !Number.isFinite(fHi)) return { k: NaN, reason: 'točka ne doseže 800 °C uz zadane parametre' };
-    if (t85meas < fLo) return { k: lo, reason: 'Izmjereni t8/5 kraći je od modela i uz k = 0,2', bound: true };
-    if (t85meas > fHi) return { k: hi, reason: 'Izmjereni t8/5 dulji je od modela i uz k = 1,3', bound: true };
-    for (let i = 0; i < 40; i++) {
-      const m = (lo + hi) / 2, fm = t85At(m);
-      if (!Number.isFinite(fm) || fm < t85meas) lo = m; else hi = m;
-    }
-    const kf = (lo + hi) / 2, ye = yAt({ ...p, kEff: kf });
-    return { k: kf, yEval: ye, reason: ye < y - 0.05 ? `Model u točki mjerenja ne doseže dovoljno visoku temperaturu, pa je t8/5 uspoređen ${ye.toFixed(1).replace('.', ',')} mm od osi zavara` : '' };
+    const t85At = k => t85EN(heatInput({ ...p, kEff: k }), T0, p.d, p.joint).t85;   // raste s k
+    if (!Number.isFinite(t85meas) || t85meas <= 0) return { k: NaN, reason: 'izmjereni ciklus nema t8/5' };
+    const fLo = t85At(K_MIN), fHi = t85At(K_MAX);
+    if (t85meas < fLo) return { k: K_MIN, bound: true, reason: `Izmjereni t8/5 kraći je nego što norma daje i uz k = 0,2. Provjeri mjerenje i parametre` };
+    if (t85meas > fHi) return { k: K_MAX, bound: true, reason: `Izmjereni t8/5 dulji je nego što norma daje i uz k = 1,0 (sva toplina luka u komadu). Razlog nije iskoristivost, nego npr. mala ploča koja se cijela zagrije, predgrijavanje ili položaj termopara` };
+    let lo = K_MIN, hi = K_MAX;
+    for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; if (t85At(m) < t85meas) lo = m; else hi = m; }
+    return { k: (lo + hi) / 2, reason: '' };
   }
 
   // Izmjereni ciklus: vrh i t8/5 iz niza [t, T]

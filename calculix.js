@@ -162,10 +162,10 @@
     for (let k = 0; k < NZ; k++) for (let i = 0; i < NX; i++) { nSym.push(nid(i, 0, k)); nOuter.push(nid(i, NY - 1, k)); }
     set('NSET', 'Nsym', nSym); set('NSET', 'Nrub', nOuter);
     const iMid = Math.round(nx / 2);
-    const yProbe = opts.yProbe ?? 3;
-    let jp = 0; ys.forEach((y, j) => { if (Math.abs(y - yProbe) < Math.abs(ys[jp] - yProbe)) jp = j; });
-    const probe = nid(iMid, jp, nz);
-    set('NSET', 'Ntermopar', [probe]);
+    // "termoparovi": čvorovi gornje površine na sredini duljine, do 25 mm od osi; skripta za rezultate
+    // među njima bira točku u ZUT-u (najviši vrh ispod solidusa), jer se rub taline ne zna unaprijed
+    const probes = []; ys.forEach((y, j) => { if (y <= 25 + 1e-9) probes.push(nid(iMid, j, nz)); });
+    set('NSET', 'Ntermopar', probes);
     const eProf = [], eWeld = [];
     for (let j = 0; j < NY - 1; j++) eProf.push(eid(iMid, j, nz - 1));
     for (let i = 0; i < nx; i++) eWeld.push(eid(i, 0, nz - 1));
@@ -275,7 +275,7 @@
     return {
       toplina: th.join('\n') + '\n',
       naprezanja: mech.join('\n') + '\n',
-      info: { ...baseInfo, nAmp: fluxLines.length / 2, probe, yProbe: ys[jp] }
+      info: { ...baseInfo, nAmp: fluxLines.length / 2, nProbes: probes.length }
     };
   }
 
@@ -287,10 +287,12 @@ Redoslijed:   ccx -i toplina
               ccx -i naprezanja
               python izvuci_rezultate.py
 Ulaz:   naprezanja.inp i naprezanja.dat (naprezanja u integracijskim točkama),
-        toplina.dat (temperatura termopara)
+        toplina.dat (temperature čvorova uz površinu, do 25 mm od osi)
 Izlaz:  profil_sx.csv  - y (mm); sigma_x (MPa)   preko zavara, na sredini duljine
         profil_sy.csv  - x (mm); sigma_y (MPa)   duž osi zavara
-        ciklus_T.csv   - t (s); T (°C)           toplinski ciklus u točki termopara
+        ciklus_T.csv   - t (s); T (°C)           toplinski ciklus u ZUT-u: od čvorova uz površinu bira se
+                                                 onaj s najvišim vrhom ispod solidusa (1450 °C), a njegova
+                                                 udaljenost od osi upisuje se u prvi redak (# y_mm = …)
 Naprezanja su prosjeci integracijskih točaka elemenata gornjeg sloja (središte elementa),
 što je pouzdanije od vrijednosti u čvorovima, koje se ekstrapoliraju.
 """
@@ -343,30 +345,27 @@ def citaj_naprezanja(path):
     return {k: {e: [s[a] / s[6] for a in range(6)] for e, s in v.items()} for k, v in rez.items()}
 
 def citaj_termopar(path):
-    """Temperature čvora termopara iz .dat datoteke: lista (vrijeme, T)."""
-    tocke, t = [], None
+    """Temperature čvorova skupa NTERMOPAR iz .dat datoteke: {čvor: [(vrijeme, T), ...]}."""
+    nizovi, t = {}, None
     with open(path) as fh:
         for red in fh:
             m = re.search(r"temperatures for set NTERMOPAR and time\s+([-+0-9.Ee]+)", red, re.I)
             if m:
                 t = float(m.group(1)); continue
-            if t is not None:
-                d = red.split()
-                if len(d) == 2:
-                    try:
-                        tocke.append((t, float(d[1])))
-                    except ValueError:
-                        pass
-                    t = None
-    # vrijeme drugog koraka (hlađenja) nastavlja se na prvi
-    izlaz, pomak, prethodno = [], 0.0, -1.0
-    for t, T in tocke:
-        if t + pomak < prethodno - 1e-9:
-            pomak = prethodno
-        prethodno = t + pomak
-        izlaz.append((t + pomak, T))
-    return izlaz
+            if t is None:
+                continue
+            d = red.split()
+            if len(d) == 2:
+                try:
+                    nizovi.setdefault(int(d[0]), []).append((t, float(d[1])))
+                    continue
+                except ValueError:
+                    pass
+            if d:
+                t = None
+    return nizovi
 
+SOLIDUS = 1450.0
 cvorovi, elementi = citaj_mrezu(mapa + "naprezanja.inp")
 s = citaj_naprezanja(mapa + "naprezanja.dat")
 if "EPROFIL" not in s or "EZAVAR" not in s:
@@ -385,11 +384,19 @@ with open("profil_sy.csv", "w") as fh:
     fh.write("x_mm;sigma_y_MPa\n")
     for x, v in sorted((sredina(e)[0], v[1]) for e, v in s["EZAVAR"].items()):
         fh.write(f"{x:.3f};{v:.2f}\n".replace(".", ","))
-tocke = citaj_termopar(mapa + "toplina.dat")
+nizovi = citaj_termopar(mapa + "toplina.dat")
+# točka u ZUT-u: najviši vrh ispod solidusa (krupnozrnati ZUT uz rub taline); ako je nema, vrh najbliži 1250 °C
+vrh = {n: max(T for _, T in v) for n, v in nizovi.items()}
+zut = [n for n in vrh if 800.0 < vrh[n] < SOLIDUS]
+izbor = max(zut, key=lambda n: vrh[n]) if zut else min(vrh, key=lambda n: abs(vrh[n] - 1250.0))
+y_izbor = cvorovi[izbor][1]
+tocke = sorted(nizovi[izbor])
 with open("ciklus_T.csv", "w") as fh:
+    fh.write(f"# y_mm = {y_izbor:.2f}; vrh {vrh[izbor]:.0f} C\n".replace(".", ","))
     fh.write("t_s;T_C\n")
     for t, T in tocke:
         fh.write(f"{t:.3f};{T:.2f}\n".replace(".", ","))
+print(f"Toplinski ciklus: {y_izbor:.2f} mm od osi zavara, vrh {vrh[izbor]:.0f} °C".replace(".", ","))
 print("Zapisano: profil_sx.csv, profil_sy.csv, ciklus_T.csv (" + str(len(tocke)) + " točaka ciklusa)")
 `;
 

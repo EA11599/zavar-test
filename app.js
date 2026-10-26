@@ -262,13 +262,16 @@
     let h = `<div class="tablewrap"><table class="t"><tr><th></th><th>Učitano</th><th>Model (Rosenthal, ${fmt(y, 1)} mm${KCAL.on ? ', kalibrirani k' : ''})</th></tr>` +
       row('Vršna temperatura', st.peak, model && Math.min(model.peak, 3000), '°C', 0) +
       row('t8/5', st.t85, model && model.t85, 's', 1) + '</table></div>' +
-      `<p class="note">Za usporedbu, t8/5 prema EN 1011-2 iznosi ${fmt(E.t85, 1)} s. Rosenthal raspoređuje toplinu po cijeloj debljini, pa uz površinu daje niže vršne temperature od stvarnih; t8/5 se u ZUT-u s udaljenošću mijenja malo.</p>`;
+      `<p class="note">t8/5 prema EN 1011-2 iznosi ${fmt(E.t85, 1)} s${KCAL.on ? ' (s kalibriranim k)' : ''}; to je vrijednost koju stranica koristi za tvrdoću i rizik. ` +
+      (E.is2D ? 'Za ovu debljinu Rosenthal raspoređuje toplinu jednoliko po debljini (2D), pa uz površinu daje niže vršne temperature od stvarnih.' : 'Za ovu debljinu Rosenthal računa s točkastim izvorom na površini (3D), pa blizu izvora daje više vršne temperature od stvarnih.') +
+      ' t8/5 se u ZUT-u s udaljenošću mijenja malo.</p>';
     if (mcStale()) h = '<p class="warnline">Ciklus je učitan uz druge ulaze (struja, napon, brzina, debljina, temperatura komada…) nego što su sada upisani, pa usporedba i kalibracija ne vrijede za trenutne ulaze.</p>' + h;
     if (!Number.isFinite(st.t85)) h += `<p class="warnline">Učitani ciklus ne prolazi kroz 800 i 500 °C (vrh ${fmt(st.peak, 0)} °C), pa t8/5 i kalibracija nisu mogući. Kalibracija treba ciklus iz ZUT-a s vrhom iznad 800 °C, najbolje oko 1.000 do 1.350 °C.</p>`;
     else {
-      h += `<div class="row" style="margin-top:10px"><button type="button" id="mcCal">Kalibriraj k prema ovom ciklusu</button>` +
+      h += `<p class="note">Kalibracija traži toplinsku iskoristivost k (0,2 do 1,0) za koju je t8/5 prema EN 1011-2 jednak izmjerenom (${fmt(st.t85, 1)} s), pa se nakon primjene prikazani i izmjereni t8/5 poklapaju.</p>` +
+        `<div class="row" style="margin-top:10px"><button type="button" id="mcCal">Kalibriraj k prema ovom ciklusu</button>` +
         (KCAL.on ? `<button type="button" class="ghost" id="mcReset">Vrati k iz norme (${fmt(W.K[P.proc], 1)})</button>` : '') + '</div>';
-      if (Number.isFinite(KCAL.k)) h += `<p class="note">Kalibrirani k = <b>${fmt(KCAL.k, 3)}</b> (norma za ${P.proc}: ${fmt(W.K[P.proc], 1)})${KCAL.note ? '. ' + esc(KCAL.note) : ''}. ${KCAL.on ? 'Primijenjen je u svim izračunima na stranici i u generatoru za CalculiX.' : ''}</p>`;
+      if (Number.isFinite(KCAL.k)) h += `<p class="${KCAL.bound ? 'warnline' : 'note'}">Kalibrirani k = <b>${fmt(KCAL.k, 3)}</b> (norma za ${P.proc}: ${fmt(W.K[P.proc], 1)})${KCAL.note ? '. ' + esc(KCAL.note) : ''}. ${KCAL.on ? 'Primijenjen je u svim izračunima na stranici i u generatoru za CalculiX.' : `Uz njega t8/5 prema EN 1011-2 iznosi ${fmt(W.t85EN(W.heatInput({ ...P, kEff: KCAL.k }), P.T0, P.d, P.joint).t85, 1)} s.`}</p>`;
       if (Number.isFinite(KCAL.k) && !KCAL.on) h += `<div class="row"><button type="button" id="mcApply">Primijeni k = ${fmt(KCAL.k, 2)}</button></div>`;
     }
     $('mcOut').innerHTML = h;
@@ -276,7 +279,7 @@
     if (b1) b1.onclick = () => {
       const r = W.calibrateK(pBase, y, st.t85, P.T0);
       if (!Number.isFinite(r.k)) { $('mcStatus').textContent = 'Kalibracija nije moguća: ' + r.reason + '.'; return; }
-      Object.assign(KCAL, { k: r.k, on: false, note: r.reason || '', from: MC.name });
+      Object.assign(KCAL, { k: r.k, on: false, note: r.reason || '', bound: !!r.bound, from: MC.name });
       $('mcStatus').textContent = '';
       renderMeasured();
     };
@@ -300,6 +303,9 @@
     const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
     const text = await f.text(); let pts = parseTwoColsTime(text);
     const keep = MC.pts ? ' Prethodno učitani ciklus ostaje.' : '';
+    // ciklus_T.csv iz skripte za CalculiX: prvi redak "# y_mm = 4,50; vrh 1379 C" daje udaljenost točke od osi
+    const yHead = text.match(/^\ufeff?\s*#\s*y_mm\s*=\s*([-\d.,]+)/m);
+    if (yHead) { const yv = numv(yHead[1]); if (Number.isFinite(yv) && yv > 0) $('mcY').value = String(yv).replace('.', ','); }
     if (pts.length < 5) { $('mcStatus').textContent = `U "${f.name}" nije pronađeno barem 5 redaka s vremenom i temperaturom.` + keep; return; }
     const head = text.replace(/^\ufeff/, '').split(/\r?\n/)[0].toLowerCase().split(/[;,\t]|\s+/).filter(Boolean);
     const notes = [];
@@ -314,7 +320,8 @@
     KCAL.k = NaN;
     const y = numv($('mcY').value);
     if (Number.isFinite(y)) { probeY = y; probeAuto = false; }
-    $('mcStatus').textContent = `Učitano ${pts.length} ${plural(pts.length, 'točka', 'točke', 'točaka')} iz "${f.name}"${notes.length ? ' (' + notes.join('; ') + ')' : ''}. Upiši udaljenost točke mjerenja od osi zavara.`;
+    $('mcStatus').textContent = `Učitano ${pts.length} ${plural(pts.length, 'točka', 'točke', 'točaka')} iz "${f.name}"${notes.length ? ' (' + notes.join('; ') + ')' : ''}. ` +
+      (yHead ? `Udaljenost točke od osi zavara (${$('mcY').value} mm) pročitana je iz datoteke.` : 'Upiši udaljenost točke mjerenja od osi zavara.');
     if (P) { renderCycle(); if (!playing) drawField(); }
   });
   $('mcY').addEventListener('input', () => {

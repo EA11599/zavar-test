@@ -114,13 +114,15 @@ test('poprečna naprezanja slobodnih ploča imaju neto silu nula, ukliještenost
   assert.ok(hi.at(250) > free.at(250));
 });
 
-test('kalibracija k: iz "izmjerenog" ciklusa vraća k kojim je ciklus izračunat', () => {
-  const pk = { ...base, kEff: 0.7 };
-  const meas = W.thermalCycle(pk, 3, 20, 80, 2000);
-  const r = W.calibrateK(base, 3, meas.t85, 20);
-  near(r.k, 0.7, 0.01, 'k');
-  const s = W.cycleStats(meas.pts);
-  near(s.t85, meas.t85, 0.05, 'cycleStats t8/5');
+test('kalibracija k: vraća k za koji je t8/5 prema EN 1011-2 jednak izmjerenom, najviše 1,0', () => {
+  const t = W.evaluate({ ...base, kEff: 0.7 }).t85;
+  const r = W.calibrateK(base, 3, t, base.T0);
+  near(r.k, 0.7, 1e-4, 'k');
+  near(W.evaluate({ ...base, kEff: r.k }).t85, t, 1e-3, 'prikazani t8/5 nakon kalibracije = izmjereni');
+  const big = W.calibrateK(base, 3, 10 * t, base.T0);
+  assert.strictEqual(big.k, 1); assert.ok(big.bound);
+  const meas = W.thermalCycle({ ...base, kEff: 0.7 }, 3, 20, 80, 2000);
+  near(W.cycleStats(meas.pts).t85, meas.t85, 0.05, 'cycleStats t8/5');
 });
 
 test('kalibrirani k mijenja unos topline i t8/5', () => {
