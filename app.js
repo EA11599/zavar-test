@@ -1988,6 +1988,10 @@ Pravila:
     if (!tab) { tab = $('t-naprezanja'); el = null; }
     document.querySelectorAll('.tab').forEach(t => { t.hidden = t !== tab; });
     document.querySelectorAll('nav.tabs a').forEach(a => { if (a.dataset.tab === tab.id) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+    { // aktivna kartica vidljiva i na uskom zaslonu (traka se pomiče vodoravno)
+      const nv = document.querySelector('nav.tabs'), ac = nv.querySelector('[aria-current="page"]');
+      if (ac && nv.scrollWidth > nv.clientWidth) { nv.scrollLeft = Math.max(0, ac.offsetLeft - nv.offsetLeft - (nv.clientWidth - ac.offsetWidth) / 2); nv.dispatchEvent(new Event('scroll')); }
+    }
     $('inSum').hidden = tab.id === 't-naprezanja';
     // preglednik nakon promjene adrese sam skoči na sidro; to se poništava u sljedećem okviru
     const place = () => { if (el && !TAB_ROOTS[h]) el.scrollIntoView({ behavior: 'auto', block: 'start' }); else window.scrollTo(0, 0); };
