@@ -1990,8 +1990,10 @@ Pravila:
     document.querySelectorAll('nav.tabs a').forEach(a => { if (a.dataset.tab === tab.id) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     $('inSum').hidden = tab.id === 't-naprezanja';
     // preglednik nakon promjene adrese sam skoči na sidro; to se poništava u sljedećem okviru
+    const place = () => { if (el && !TAB_ROOTS[h]) el.scrollIntoView({ behavior: 'auto', block: 'start' }); else window.scrollTo(0, 0); };
+    setTimeout(place, 60);   // preglednik ponekad skoči na sidro tek kad kartica postane vidljiva
     requestAnimationFrame(() => {
-      if (el && !TAB_ROOTS[h]) el.scrollIntoView({ behavior: 'auto', block: 'start' }); else window.scrollTo(0, 0);
+      place();
       // nakon promjene kartice tipkovnicom ili čitačem zaslona fokus ide na naslov kartice
       if (ev && TAB_ROOTS[h]) { const h2 = tab.querySelector('h2'); if (h2) { h2.setAttribute('tabindex', '-1'); h2.focus({ preventScroll: true }); } }
     });
@@ -2000,6 +2002,14 @@ Pravila:
   }
   function go(h) { if (location.hash === '#' + h) route(); else location.hash = h; }
   window.addEventListener('hashchange', route);
+  // klik na karticu mijenja adresu bez skoka preglednika na sidro
+  document.querySelectorAll('nav.tabs a').forEach(a => a.addEventListener('click', ev => {
+    if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button) return;
+    ev.preventDefault(); const h = a.getAttribute('href');
+    if (location.hash !== h) history.pushState(null, '', h);
+    route(ev);
+  }));
+  window.addEventListener('popstate', () => route());
   { const nv = document.querySelector('nav.tabs'); const upd = () => nv.classList.toggle('end', nv.scrollLeft + nv.clientWidth >= nv.scrollWidth - 4);
     nv.addEventListener('scroll', upd, { passive: true }); window.addEventListener('resize', upd); upd(); }
   // sažetak ulaza na ostalim karticama
